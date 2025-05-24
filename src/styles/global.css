@@ -1,0 +1,18 @@
+/* globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ensure html and body allow for centering and take up necessary space. */
+/* Tailwind's preflight usually handles this, but check for overrides. */
+html {
+  box-sizing: border-box;
+}
+*, *:before, *:after {
+  box-sizing: inherit;
+}
+
+body {
+  margin: 0; /* Reset default margin */
+  /* Add other body-level defaults if necessary, but avoid fixed widths or alignments that break mx-auto */
+}

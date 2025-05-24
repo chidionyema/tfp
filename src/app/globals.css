@@ -1,21 +1,29 @@
+/* app/globals.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+  IMPORTANT: For testing, remove ALL other custom global styles from this file temporarily.
+  Any other styles you need should be added back carefully one by one AFTER confirming
+  the basic layout works with just the Tailwind directives.
+
+  The styles below are common, safe additions and best practices.
+*/
+html {
+  box-sizing: border-box; /* Apply a natural box layout model to all elements */
+  -webkit-font-smoothing: antialiased; /* Optional: for smoother fonts on Mac/iOS */
+  -moz-osx-font-smoothing: grayscale; /* Optional: for smoother fonts on Mac/iOS */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+*, *:before, *:after {
+  box-sizing: inherit; /* Inherit box-sizing from html */
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0; /* Remove default browser margins */
+  /* You can set a global font family here if you wish, e.g.: */
+  /* font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"; */
+  /* You can set a global default background for the page here if desired */
+  /* background-color: #f3f4f6; */ /* Example: light gray */
 }
