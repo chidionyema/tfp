@@ -2,6 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+prerequisites
+docker
+docker-compose
+(https://www.gnupg.org)  brew install gnupg
+jq https://jqlang.org brew install jq
+brew install coreutils
+
 First, run the development server:
 
 ```bash
