@@ -1,147 +1,33 @@
-
 "use client";
 
-import React, { useState, useRef, useEffect, ReactNode, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { ArrowLeft, MapPin, Clock, AlertTriangle, Eye, ChevronRight, X, DollarSign } from 'lucide-react';
 import Link from 'next/link';
 import LocationPicker from '@/components/ui/LocationPicker';
 import PhotoUpload from '@/components/ui/PhotoUpload';
+import {
+      STEP_TITLES,
+      PLATFORM_FEE_RATE,
+      MIN_PERK_VALUE,
+      getCategories,
+     getUrgencyOptions,
+    } from '@/constants/task-constants';
+// TaskCreationPage.tsx
+import type { TaskFormData, PerkItem } from '@/types/task';
+import { InputField, OptionGrid } from '@/components/form';
+import {
+       calculateTotalPerkValue,
+       calculatePlatformFee,
+       isCombinationPerk,
+       getCombinationBonus,
+       estimatedSuccessRate,
+       getPerkIcon,
+       getDeliveryInfo,
+     } from '@/utils/task-utils';
 
-// Interface definitions (remain the same)
-interface PerkItem {
-  id: string;
-  type: 'payment' | 'good' | 'service';
-  name: string;
-  description: string;
-  estimatedValue: number;
-  customValue?: number;
-  quantity?: number;
-  brand?: string;
-  model?: string;
-  condition?: 'new' | 'like-new' | 'good';
-  photos?: string[];
-  escrowMethod?: 'digital' | 'physical' | 'service_mediation';
-  deliveryMethod?: 'ship_to_platform' | 'local_handoff' | 'direct_delivery';
-  verificationRequired?: boolean;
-}
-
-interface TaskFormData {
-  title: string;
-  description: string;
-  category: string;
-  urgency: 'low' | 'medium' | 'high' | 'emergency';
-  location: { address: string; lat: number; lng: number; } | null;
-  dropoffLocation: { address: string; lat: number; lng: number; } | null;
-  needsDropoff: boolean;
-  estimatedDuration: string;
-  specificRequirements: string;
-  allowNegotiation: boolean;
-  perks: PerkItem[];
-  photos: File[];
-}
-
-interface Category {
-  id: string;
-  name: string;
-  desc: string;
-  successRate: string;
-  needsDropoff: boolean;
-}
-
-interface UrgencyOption {
-  id: string;
-  name: string;
-  desc: string;
-  color: string;
-  multiplier: string;
-}
-
-interface BaseSelectOption {
-  id: string;
-}
-
-// Reverted InputField to a simpler structure to avoid cloneElement issues.
-// ARIA props and id will be added directly to the input/textarea elements.
-const InputField = ({ label, required, error, children, id }: {
-  label: string;
-  required?: boolean;
-  error?: string;
-  children: ReactNode; // Changed back to ReactNode
-  id?: string;
-}) => {
-  const errorId = id && error ? `${id}-error-desc` : undefined;
-  return (
-    <div>
-      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-        {label} {required && <span className="text-red-500" aria-label="required">*</span>}
-      </label>
-      {children}
-      {error && <p id={errorId} className="text-red-500 text-xs mt-1" role="status" aria-live="polite">{error}</p>}
-    </div>
-  );
-};
-
-
-const OptionGrid = <T extends BaseSelectOption>({
-  options,
-  selected,
-  onSelect,
-  renderOption,
-  ariaLabel,
-  name
-}: {
-  options: T[];
-  selected: string;
-  onSelect: (id: string) => void;
-  renderOption: (option: T) => ReactNode;
-  ariaLabel: string;
-  name: string;
-}) => (
-  <fieldset className="space-y-4" aria-label={ariaLabel}>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {options.map((option) => {
-        const optionSpecificId = `${name}-${option.id}`;
-        return (
-            <label key={option.id} className="cursor-pointer">
-            <input
-                type="radio"
-                name={name}
-                value={option.id}
-                checked={selected === option.id}
-                onChange={() => onSelect(option.id)}
-                className="sr-only"
-                aria-labelledby={optionSpecificId}
-            />
-            <div
-                id={optionSpecificId}
-                className={`p-4 border-2 rounded-lg text-left transition-colors focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500 ${
-                selected === option.id
-                    ? 'border-indigo-500 bg-indigo-50'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-                role="radio"
-                aria-checked={selected === option.id}
-                tabIndex={0}
-                onClick={() => onSelect(option.id)}
-                onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSelect(option.id);
-                }
-                }}
-            >
-                {renderOption(option)}
-            </div>
-            </label>
-        );
-    })}
-    </div>
-  </fieldset>
-);
 
 // Moved stepTitles outside the component
-const STEP_TITLES = ['Task Details', 'Requirements & Photos', 'Perk Selection', 'Review & Publish'];
 
 const TaskCreationPage = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -171,24 +57,8 @@ const TaskCreationPage = () => {
   }, [errors]);
 
 
-  const PLATFORM_FEE_RATE = 0.08;
-  const MIN_PERK_VALUE = 5;
-
-  const categories: Category[] = useMemo(() => [
-    { id: 'delivery', name: 'Delivery & Pickup', desc: 'Documents, packages, items', successRate: '96%', needsDropoff: true },
-    { id: 'shopping', name: 'Shopping & Errands', desc: 'Groceries, supplies, retail', successRate: '94%', needsDropoff: false },
-    { id: 'transport', name: 'Transport & Rides', desc: 'Airport, appointments, travel', successRate: '92%', needsDropoff: true },
-    { id: 'personal', name: 'Personal Care', desc: 'Prescriptions, healthcare items', successRate: '90%', needsDropoff: false },
-    { id: 'business', name: 'Business Support', desc: 'Printing, meetings, admin', successRate: '95%', needsDropoff: false },
-    { id: 'other', name: 'Other', desc: 'Custom tasks and requests', successRate: '88%', needsDropoff: false }
-  ], []);
-
-  const urgencyOptions: UrgencyOption[] = useMemo(() => [
-    { id: 'low', name: 'Low Priority', desc: 'Within 24 hours', color: 'bg-green-100 text-green-800', multiplier: '1x perk value' },
-    { id: 'medium', name: 'Medium Priority', desc: 'Within 4-6 hours', color: 'bg-yellow-100 text-yellow-800', multiplier: '1.2x appeal' },
-    { id: 'high', name: 'High Priority', desc: 'Within 1-2 hours', color: 'bg-orange-100 text-orange-800', multiplier: '1.5x appeal' },
-    { id: 'emergency', name: 'Emergency', desc: 'ASAP (within 30 min)', color: 'bg-red-100 text-red-800', multiplier: '2x appeal' }
-  ], []);
+  const categories      = useMemo(getCategories, []);
+  const urgencyOptions  = useMemo(getUrgencyOptions, []);
 
   const perkTemplates = useMemo(() => ({
     payment: { name: 'Digital Payment', description: 'Secure payment processed through platform escrow', baseValue: 15 },
@@ -231,8 +101,6 @@ const TaskCreationPage = () => {
     }
   };
 
-  const isCombinationPerk = () => new Set(formData.perks.map(p => p.type)).size > 1;
-  const getCombinationBonus = () => isCombinationPerk() ? 4 : 0;
 
   const updatePerk = (perkId: string, updates: Partial<PerkItem>) => {
     setFormData(prev => ({
@@ -256,9 +124,7 @@ const TaskCreationPage = () => {
     setFormData(prev => ({ ...prev, perks: prev.perks.filter(perk => perk.id !== perkId) }));
   };
 
-  const calculateTotalPerkValue = () => formData.perks.reduce((total, perk) => total + ((perk.customValue ?? perk.estimatedValue) * (perk.quantity || 1)), 0);
-  const calculatePlatformFee = () => Math.round(calculateTotalPerkValue() * PLATFORM_FEE_RATE * 100) / 100;
-
+  
   const validateStep = (step: number) => {
     const newValidationErrors: Record<string, string> = {};
     if (step === 1) {
@@ -275,7 +141,7 @@ const TaskCreationPage = () => {
     if (step === 3) {
       if (formData.perks.length === 0) {
         newValidationErrors.perks = 'Please add at least one perk for your task.';
-      } else if (calculateTotalPerkValue() < MIN_PERK_VALUE) {
+      } else if (calculateTotalPerkValue(formData.perks) < MIN_PERK_VALUE) {
         newValidationErrors.perks = `Total perk value must be at least $${MIN_PERK_VALUE}.`;
       } else {
         let hasPerkError = false;
@@ -302,40 +168,7 @@ const TaskCreationPage = () => {
     return Object.keys(newValidationErrors).length === 0;
   };
 
-  const estimatedSuccessRate = () => {
-    let baseRate = 85;
-    const category = categories.find(c => c.id === formData.category);
-    if (category && category.successRate) {
-        const rate = parseInt(category.successRate.replace('%', ''));
-        if (!isNaN(rate)) baseRate += rate - 85;
-    }
-    if (formData.urgency === 'emergency') baseRate += 5;
-    else if (formData.urgency === 'high') baseRate += 3;
-    const totalValue = calculateTotalPerkValue();
-    if (totalValue >= 30) baseRate += 8;
-    else if (totalValue >= 20) baseRate += 5;
-    else if (totalValue >= 15) baseRate += 3;
-    if (isCombinationPerk()) baseRate += getCombinationBonus();
-    return Math.min(baseRate, 98);
-  };
 
-  const getPerkIcon = (type: PerkItem['type']) => {
-    switch(type) {
-      case 'payment': return <DollarSign size={20} className="text-green-600" aria-hidden="true" />;
-      case 'good': return <span className="text-xl" role="img" aria-label="Physical good or product icon">📱</span>;
-      case 'service': return <span className="text-xl" role="img" aria-label="Service icon (e.g., transportation)">🚗</span>;
-      default: return <span className="text-xl" role="img" aria-label="Default perk icon (gift)">🎁</span>;
-    }
-  };
-
-  const getDeliveryInfo = (method?: PerkItem['deliveryMethod']) => { 
-    if (!method || method === 'local_handoff') return null; 
-    const infoMap: Record<Exclude<PerkItem['deliveryMethod'], undefined | 'local_handoff'>, { text: string; color: string }> = {
-      ship_to_platform: { text: 'Platform Escrow: You\'ll ship the item to our secure facility. We\'ll verify and hold it until task completion, then forward to the helper. Additional $5-15 handling fee applies.', color: 'blue' },
-      direct_delivery: { text: 'Lower Protection: You deliver directly to helper. Reduced dispute protection for both parties.', color: 'amber' }
-    };
-    return infoMap[method as Exclude<PerkItem['deliveryMethod'], undefined | 'local_handoff'>];
-  };
 
   const LocationButton = ({ location, onClick, label, icon = "indigo" }: {
     location: { address: string; lat: number; lng: number; } | null;
@@ -579,8 +412,8 @@ const TaskCreationPage = () => {
               <div className="text-gray-600" aria-live="polite">Step {currentStep} of {STEP_TITLES.length}</div>
               {formData.perks.length > 0 && (
                 <div className="flex items-center gap-2" role="status" aria-live="polite">
-                  <div className="bg-green-100 text-green-800 px-2 py-0.5 text-xs sm:px-3 sm:py-1 sm:text-sm rounded-full font-medium whitespace-nowrap">{estimatedSuccessRate()}% success</div>
-                  <div className="bg-blue-100 text-blue-800 px-2 py-0.5 text-xs sm:px-3 sm:py-1 sm:text-sm rounded-full font-medium whitespace-nowrap">${calculateTotalPerkValue().toFixed(0)} value</div>
+                  <div className="bg-green-100 text-green-800 px-2 py-0.5 text-xs sm:px-3 sm:py-1 sm:text-sm rounded-full font-medium whitespace-nowrap">{estimatedSuccessRate(formData.perks, formData.category, formData.urgency, categories)}% success</div>
+                  <div className="bg-blue-100 text-blue-800 px-2 py-0.5 text-xs sm:px-3 sm:py-1 sm:text-sm rounded-full font-medium whitespace-nowrap">${calculateTotalPerkValue(formData.perks).toFixed(0)} value</div>
                 </div>
               )}
             </div>
@@ -787,9 +620,9 @@ const TaskCreationPage = () => {
                       <li><strong>Physical Goods:</strong> Optional platform storage/verification.</li>
                       <li><strong>Services:</strong> Milestone tracking and completion mediation.</li>
                     </ul>
-                    {calculateTotalPerkValue() > 0 && (
+                    {calculateTotalPerkValue(formData.perks) > 0 && (
                       <div className="mt-1 sm:mt-2 text-xs sm:text-sm font-medium text-blue-800">
-                        Platform fee: ${calculatePlatformFee().toFixed(2)}
+                        Platform fee: ${calculatePlatformFee(formData.perks).toFixed(2)}
                         <span className="block text-xs sm:inline"> (Note: Escrow for goods may have additional fees)</span>
                       </div>
                     )}
@@ -817,13 +650,13 @@ const TaskCreationPage = () => {
                   ))}
                 </div>
 
-                {isCombinationPerk() && (
+                {isCombinationPerk(formData.perks) && (
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 sm:p-3 mb-3 sm:mb-4" role="status">
                     <div className="flex items-center gap-2">
                       <span className="text-purple-600 text-lg" role="img" aria-label="gift indicating combination bonus" aria-hidden="true">🎁</span>
                       <div>
                         <h4 className="text-xs sm:text-sm font-medium text-purple-800">Combination Perk Bonus!</h4>
-                        <p className="text-xs text-purple-700">Increased appeal (+{getCombinationBonus()}% success rate).</p>
+                        <p className="text-xs text-purple-700">Increased appeal (+{getCombinationBonus(formData.perks)}% success rate).</p>
                       </div>
                     </div>
                   </div>
@@ -853,15 +686,15 @@ const TaskCreationPage = () => {
                   <div className="space-y-1 sm:space-y-2 text-xs sm:text-sm">
                     <div className="flex justify-between">
                       <span className="text-indigo-700">Total Value:</span>
-                      <span className="font-medium text-indigo-900">${calculateTotalPerkValue().toFixed(2)}</span>
+                      <span className="font-medium text-indigo-900">${calculateTotalPerkValue(formData.perks).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-indigo-700">Platform Fee ({(PLATFORM_FEE_RATE * 100).toFixed(0)}%):</span>
-                      <span className="font-medium text-indigo-900">-${calculatePlatformFee().toFixed(2)}</span>
+                      <span className="font-medium text-indigo-900">-${calculatePlatformFee(formData.perks).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between border-t border-indigo-200 pt-1 sm:pt-2 mt-1 sm:mt-2">
                       <span className="text-indigo-700 font-medium">Net to Helper:</span>
-                      <span className="font-bold text-indigo-900">${(calculateTotalPerkValue() - calculatePlatformFee()).toFixed(2)}</span>
+                      <span className="font-bold text-indigo-900">${(calculateTotalPerkValue(formData.perks) - calculatePlatformFee(formData.perks)).toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
@@ -889,10 +722,10 @@ const TaskCreationPage = () => {
                 <h3 id="task-review-summary-heading" className="sr-only">Task Review Summary</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6 text-center">
                   {[
-                    { label: 'Success Rate', value: `${estimatedSuccessRate()}%`, highlight: true },
+                    { label: 'Success Rate', value: `${estimatedSuccessRate(formData.perks, formData.category, formData.urgency, categories)}%`, highlight: true },
                     { label: 'Avg. Claim Time', value: '8 min' },
-                    { label: 'Expected Helpers', value: Math.max(1, Math.floor(calculateTotalPerkValue() / 15) + (isCombinationPerk() ? 1 : 0) + (formData.urgency === 'emergency' ? 1:0) ).toString() },
-                    { label: 'Total Value', value: `$${calculateTotalPerkValue().toFixed(0)}`, highlight: true }
+                    { label: 'Expected Helpers', value: Math.max(1, Math.floor(calculateTotalPerkValue(formData.perks) / 15) + (isCombinationPerk(formData.perks) ? 1 : 0) + (formData.urgency === 'emergency' ? 1:0) ).toString() },
+                    { label: 'Total Value', value: `${calculateTotalPerkValue(formData.perks).toFixed(0)}`, highlight: true }
                   ].map(stat => (
                     <div key={stat.label}>
                       <div className={`text-xl sm:text-2xl font-bold ${stat.highlight ? (stat.label === 'Success Rate' ? 'text-green-600' : 'text-purple-600') : 'text-blue-600'}`}>{stat.value}</div>
@@ -920,7 +753,7 @@ const TaskCreationPage = () => {
                       </span>
                     )}
                     <span className="px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-green-100 text-green-800">
-                      {formData.perks.length} Perk{formData.perks.length !== 1 ? 's' : ''} {isCombinationPerk() && '(Combo)'}
+                      {formData.perks.length} Perk{formData.perks.length !== 1 ? 's' : ''} {isCombinationPerk(formData.perks) && '(Combo)'}
                     </span>
                   </div>
 
@@ -971,7 +804,7 @@ const TaskCreationPage = () => {
                   {formData.perks.length > 0 && (
                     <div className="bg-white rounded-lg p-3 sm:p-4 border" role="region" aria-labelledby="review-perk-package-heading">
                       <h4 id="review-perk-package-heading" className="font-medium text-gray-900 mb-2 sm:mb-3 text-sm sm:text-base">
-                        Perk Package{isCombinationPerk() ? ' (Combination)' : ''}:
+                        Perk Package{isCombinationPerk(formData.perks) ? ' (Combination)' : ''}:
                       </h4>
                       <ul className="space-y-2 sm:space-y-3" aria-label="List of perks in the package">
                         {formData.perks.map(perk => (
@@ -1000,15 +833,15 @@ const TaskCreationPage = () => {
                         <li className="border-t pt-2 sm:pt-3 mt-2 sm:mt-3 text-sm">
                           <div className="flex justify-between">
                             <span className="text-gray-600">Total Value:</span>
-                            <span className="font-medium">${calculateTotalPerkValue().toFixed(2)}</span>
+                            <span className="font-medium">${calculateTotalPerkValue(formData.perks).toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-600">Platform Fee:</span>
-                            <span className="text-red-600">-${calculatePlatformFee().toFixed(2)}</span>
+                            <span className="text-red-600">-${calculatePlatformFee(formData.perks).toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between font-medium mt-1">
                             <span>Net to Helper:</span>
-                            <span className="text-green-600">${(calculateTotalPerkValue() - calculatePlatformFee()).toFixed(2)}</span>
+                            <span className="text-green-600">${(calculateTotalPerkValue(formData.perks) - calculatePlatformFee(formData.perks)).toFixed(2)}</span>
                           </div>
                         </li>
                         
@@ -1065,9 +898,9 @@ const TaskCreationPage = () => {
                         if (validateStep(1) && validateStep(3)) { 
                             console.log('Submitting task:', {
                                 ...formData, 
-                                totalPerkValue: calculateTotalPerkValue(), 
-                                platformFee: calculatePlatformFee(),
-                                netPerkValue: calculateTotalPerkValue() - calculatePlatformFee()
+                                totalPerkValue: calculateTotalPerkValue(formData.perks), 
+                                platformFee: calculatePlatformFee(formData.perks),
+                                netPerkValue: calculateTotalPerkValue(formData.perks) - calculatePlatformFee(formData.perks)
                             });
                              alert('Task Submitted! (Check console for data). This is a demo action.');
                         } else {
@@ -1078,7 +911,7 @@ const TaskCreationPage = () => {
                     }} 
                     className="w-full px-8 py-2.5 sm:py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:w-auto">
                   Publish Task 
-                  <span className="block text-xs sm:inline sm:ml-1">(${calculatePlatformFee().toFixed(2)} fee)</span>
+                  <span className="block text-xs sm:inline sm:ml-1">(${calculatePlatformFee(formData.perks).toFixed(2)} fee)</span>
                 </button>
               )}
             </div>
@@ -1107,7 +940,7 @@ const TaskCreationPage = () => {
       </div>
       
       <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {formData.perks.length > 0 && `${formData.perks.length} perk${formData.perks.length !== 1 ? 's' : ''} added, total value $${calculateTotalPerkValue().toFixed(2)}.`}
+        {formData.perks.length > 0 && `${formData.perks.length} perk${formData.perks.length !== 1 ? 's' : ''} added, total value ${calculateTotalPerkValue(formData.perks).toFixed(2)}.`}
       </div>
     </div>
   );
