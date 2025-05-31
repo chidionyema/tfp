@@ -1,5 +1,5 @@
 // File: src/components/task-wizard/Step1_BasicInfo.tsx
-// Purpose: fix uncontrolled-to-controlled warnings by defaulting undefined values
+// Purpose: fix uncontrolled-to-controlled warnings and improve location UX
 
 "use client";
 
@@ -39,14 +39,18 @@ export const Step1_BasicInfo: React.FC<S1Props> = ({
 
   const isPhysicalMode = data.mode === "physical";
   const isHybridMode = data.mode === "hybrid";
+  // Removed unused isOnlineMode variable
 
   /* -------------------------------------------------------------------- */
   /*  Helpers to avoid uncontrolled-to-controlled switches                 */
   /* -------------------------------------------------------------------- */
-  const title = data.title ?? ""; // empty string prevents undefined -> string
+  const title = data.title ?? "";
   const description = data.description ?? "";
   const requiresPickup = Boolean(data.requiresPickup);
   const needsDropoff = Boolean(data.needsDropoff);
+
+  // Removed unused needsAnyLocation variable
+  const showLocationOptions = isPhysicalMode || isHybridMode;
 
   /* -------------------------------------------------------------------- */
   /*  Render                                                               */
@@ -200,57 +204,116 @@ export const Step1_BasicInfo: React.FC<S1Props> = ({
         </>
       </InputField>
 
-      {/* Hybrid toggle for on‑site visit */}
-      {isHybridMode && (
-        <div className="flex items-center gap-2 sm:gap-3">
-          <input
-            type="checkbox"
-            id="requiresPickup"
-            checked={requiresPickup}
-            onChange={(e) => onChange("requiresPickup", e.target.checked)}
-            className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 focus:ring-offset-1 focus:ring-2"
-          />
-          <label htmlFor="requiresPickup" className="text-sm font-medium text-gray-700">
-            A helper must visit a location (e.g. collect print‑outs)
-          </label>
-        </div>
-      )}
-
-      {/* Pickup location (physical mode OR hybrid & requiresPickup) */}
-      {(isPhysicalMode || (isHybridMode && requiresPickup)) && (
-        <InputField
-          label="Pickup / Task Location"
-          required
-          id="task-location-button"
-          error={errors.location}
-        >
-          <LocationButton
-            location={data.location}
-            onClick={openLocation}
-            label="Task Location"
-          />
-        </InputField>
-      )}
-
-      {/* Drop‑off logic (shared for physical & hybrid) */}
-      {(isPhysicalMode || isHybridMode) && (
+      {/* Location Options Section - shows for physical and hybrid modes */}
+      {showLocationOptions && (
         <>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <input
-              type="checkbox"
-              id="needsDropoff"
-              checked={needsDropoff}
-              onChange={(e) => onChange("needsDropoff", e.target.checked)}
-              className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 focus:ring-offset-1 focus:ring-2"
-            />
-            <label htmlFor="needsDropoff" className="text-sm font-medium text-gray-700">
-              This task requires a drop‑off location
-            </label>
-          </div>
+          {/* For physical mode, show location type selector */}
+          {isPhysicalMode && (
+            <InputField 
+              label="Location Requirements" 
+              required 
+              id="location-requirements"
+              error={errors.location || errors.dropoffLocation}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="requiresPickup"
+                    checked={requiresPickup}
+                    onChange={(e) => {
+                      onChange("requiresPickup", e.target.checked);
+                      // Ensure at least one location is selected for physical mode
+                      if (!e.target.checked && !needsDropoff && isPhysicalMode) {
+                        onChange("needsDropoff", true);
+                      }
+                    }}
+                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                  />
+                  <label htmlFor="requiresPickup" className="text-sm font-medium text-gray-700">
+                    Task has a pickup/work location
+                  </label>
+                </div>
 
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="needsDropoff"
+                    checked={needsDropoff}
+                    onChange={(e) => {
+                      onChange("needsDropoff", e.target.checked);
+                      // Ensure at least one location is selected for physical mode
+                      if (!e.target.checked && !requiresPickup && isPhysicalMode) {
+                        onChange("requiresPickup", true);
+                      }
+                    }}
+                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                  />
+                  <label htmlFor="needsDropoff" className="text-sm font-medium text-gray-700">
+                    Task has a drop-off location
+                  </label>
+                </div>
+
+                {!requiresPickup && !needsDropoff && isPhysicalMode && (
+                  <p className="text-xs text-red-600">
+                    Physical tasks require at least one location
+                  </p>
+                )}
+              </div>
+            </InputField>
+          )}
+
+          {/* For hybrid mode, show simplified toggles */}
+          {isHybridMode && (
+            <>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <input
+                  type="checkbox"
+                  id="requiresPickup"
+                  checked={requiresPickup}
+                  onChange={(e) => onChange("requiresPickup", e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 focus:ring-offset-1 focus:ring-2"
+                />
+                <label htmlFor="requiresPickup" className="text-sm font-medium text-gray-700">
+                  Helper needs to visit a pickup/work location
+                </label>
+              </div>
+
+              <div className="flex items-center gap-2 sm:gap-3">
+                <input
+                  type="checkbox"
+                  id="needsDropoff"
+                  checked={needsDropoff}
+                  onChange={(e) => onChange("needsDropoff", e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 focus:ring-offset-1 focus:ring-2"
+                />
+                <label htmlFor="needsDropoff" className="text-sm font-medium text-gray-700">
+                  Task requires a drop-off at a different location
+                </label>
+              </div>
+            </>
+          )}
+
+          {/* Show pickup location if needed */}
+          {requiresPickup && (
+            <InputField
+              label={needsDropoff ? "Pickup/Work Location" : "Task Location"}
+              required
+              id="task-location-button"
+              error={errors.location}
+            >
+              <LocationButton
+                location={data.location}
+                onClick={openLocation}
+                label={needsDropoff ? "Pickup/Work Location" : "Task Location"}
+              />
+            </InputField>
+          )}
+
+          {/* Show dropoff location if needed */}
           {needsDropoff && (
             <InputField
-              label="Drop‑off Location"
+              label="Drop-off Location"
               required
               id="task-dropoff-button"
               error={errors.dropoffLocation}
@@ -258,15 +321,20 @@ export const Step1_BasicInfo: React.FC<S1Props> = ({
               <LocationButton
                 location={data.dropoffLocation}
                 onClick={openDropoff}
-                label="Drop‑off Location"
+                label="Drop-off Location"
                 icon="green"
               />
             </InputField>
           )}
+
+          {/* Help text for drop-off only scenario */}
+          {!requiresPickup && needsDropoff && (
+            <p className="text-xs text-gray-600 bg-blue-50 p-3 rounded-lg">
+              <strong>Example:</strong> You&apos;ll email documents to the helper, who will print and deliver them to the drop-off location.
+            </p>
+          )}
         </>
       )}
-
-      {/* Online‑only tasks show nothing extra */}
     </div>
   );
 };
