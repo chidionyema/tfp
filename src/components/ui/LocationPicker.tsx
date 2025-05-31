@@ -8,7 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, Search, X, Navigation, Clock } from 'lucide-react';
 
-interface Location {
+export interface Location {
   id: string;
   address: string;
   lat: number;
@@ -24,7 +24,7 @@ interface LocationPickerProps {
   className?: string;
 }
 
-const LocationPicker: React.FC<LocationPickerProps> = ({
+export const LocationPicker: React.FC<LocationPickerProps> = ({
   isOpen,
   onClose,
   onLocationSelect,
