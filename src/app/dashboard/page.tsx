@@ -1,15 +1,122 @@
 // File: src/components/DashboardPage.tsx
-// Purpose: Refactored Dashboard using existing TaskCard and TaskFilters components
+// Purpose: World-class dashboard with advanced animations and visual design
 
 "use client";
 import React, { useState, useEffect, useCallback, MouseEvent } from 'react';
-import { Plus, ChevronRight, TrendingUp, Users, DollarSign, Activity, Star, Menu, X, Moon, Sun, Shield, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Plus,
+  TrendingUp,
+  Users,
+  DollarSign,
+  Activity,
+  Star,
+  Menu,
+  X,
+  Moon,
+  Sun,
+  Search,
+  Filter,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { BackgroundCheck, BackgroundCheckData } from '@/components//BackgroundCheck';
+import { BackgroundCheck } from '@/components/BackgroundCheck';
+import { BackgroundCheckData } from '@/types/backgroundCheck';
 import TaskCard from '@/components/task/TaskCard';
-import TaskFilters from '@/components/task/TaskFilters';
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
-import { MOCK_TASKS, MOCK_ACTIVE_TASKS, UI_CONFIG, BADGE_CONFIGS } from '@/constants/dashboardConstants';
+import { MOCK_TASKS, UI_CONFIG, BADGE_CONFIGS } from '@/constants/dashboardConstants';
+
+// Define Theme type based on timeThemes keys
+export type Theme = 'night' | 'morning' | 'afternoon' | 'evening';
+
+// Time-based color schemes with explicit typing
+const timeThemes: Record<Theme, { gradient: string; accent: string; text: string }> = {
+  night: {
+    gradient: 'from-slate-900 via-purple-900 to-slate-900',
+    accent: 'from-purple-600 to-blue-600',
+    text: 'Good evening',
+  },
+  morning: {
+    gradient: 'from-blue-50 via-indigo-50 to-purple-50',
+    accent: 'from-orange-400 to-pink-400',
+    text: 'Good morning',
+  },
+  afternoon: {
+    gradient: 'from-blue-50 via-sky-50 to-cyan-50',
+    accent: 'from-blue-500 to-cyan-500',
+    text: 'Good afternoon',
+  },
+  evening: {
+    gradient: 'from-orange-50 via-amber-50 to-yellow-50',
+    accent: 'from-orange-500 to-red-500',
+    text: 'Good evening',
+  },
+};
+
+// Function returns a valid Theme literal
+const getTimeBasedTheme = (): Theme => {
+  const hour = new Date().getHours();
+  if (hour < 6) return 'night'; // 12 AM - 6 AM
+  if (hour < 12) return 'morning'; // 6 AM - 12 PM
+  if (hour < 18) return 'afternoon'; // 12 PM - 6 PM
+  return 'evening'; // 6 PM - 12 AM
+};
+
+// Animation constants
+const SPRING_CONFIG = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 30,
+};
+
+const EASING = [0.25, 0.1, 0.25, 1];
+
+const animations = {
+  pageTransition: {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 },
+    transition: SPRING_CONFIG,
+  },
+  cardHover: {
+    whileHover: {
+      scale: 1.02,
+      boxShadow:
+        "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+      transition: { duration: 0.2, ease: EASING },
+    },
+    whileTap: { scale: 0.98 },
+  },
+  buttonPress: {
+    whileHover: { scale: 1.05 },
+    whileTap: { scale: 0.95 },
+    transition: { duration: 0.1 },
+  },
+  slideIn: {
+    initial: { x: -100, opacity: 0 },
+    animate: { x: 0, opacity: 1 },
+    transition: { ...SPRING_CONFIG, delay: 0.1 },
+  },
+  staggerChildren: {
+    animate: {
+      transition: {
+        staggerChildren: 0.1,
+        delayChildren: 0.2,
+      },
+    },
+  },
+  shimmer: {
+    animate: {
+      backgroundPosition: ["200% 0", "-200% 0"],
+      transition: {
+        duration: 2,
+        ease: "linear",
+        repeat: Infinity,
+      },
+    },
+  },
+};
 
 interface UserStats {
   tasksCompleted: number;
@@ -19,16 +126,6 @@ interface UserStats {
   backgroundCheckStatus: 'none' | 'pending' | 'in_progress' | 'completed' | 'failed';
 }
 
-interface ActiveTask {
-  id: string;
-  title: string;
-  status: string;
-  helper: string;
-  timeRemaining: string;
-  perk: string;
-}
-
-// Updated Task interface to match TaskCard expectations
 interface Task {
   id: string;
   title: string;
@@ -38,8 +135,8 @@ interface Task {
   urgency: 'emergency' | 'high' | 'medium' | 'low';
   estimatedDuration: string;
   successRate: string | number;
-  perks: Array<{ 
-    value?: number; 
+  perks: Array<{
+    value?: number;
     description?: string;
     successRate?: string | number;
   }>;
@@ -47,68 +144,70 @@ interface Task {
   requiresBackgroundCheck?: boolean;
 }
 
-// Define valid color keys type
 type ColorKeys = keyof typeof UI_CONFIG.colors;
 type BadgeKeys = keyof typeof BADGE_CONFIGS;
 
-const DashboardPage = () => {
-  // Core state
+const DashboardPage: React.FC = () => {
   const [userRole, setUserRole] = useState<'requester' | 'helper'>('helper');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedUrgency, setSelectedUrgency] = useState('all');
-  const [locationFilter, setLocationFilter] = useState('5km');
-  const [showSidebar, setShowSidebar] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [tasksDisplayed, setTasksDisplayed] = useState(6);
-  
-  // Background check state
-  const [showBackgroundCheck, setShowBackgroundCheck] = useState(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showSidebar, setShowSidebar] = useState<boolean>(false);
+  const [showFilters, setShowFilters] = useState<boolean>(false);
+  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [tasksDisplayed, setTasksDisplayed] = useState<number>(6);
+  const [showBackgroundCheck, setShowBackgroundCheck] = useState<boolean>(false);
   const [backgroundCheckData, setBackgroundCheckData] = useState<BackgroundCheckData | null>(null);
   const [pendingTaskClaim, setPendingTaskClaim] = useState<Task | null>(null);
+  const [currentTheme, setCurrentTheme] = useState<Theme>(getTimeBasedTheme());
 
   const router = useRouter();
-  
+
   const userStats: UserStats = {
     tasksCompleted: 47,
     rating: 4.8,
     earnings: '£340',
     helpedPeople: 32,
-    backgroundCheckStatus: backgroundCheckData ? 'completed' : 'none'
+    backgroundCheckStatus: backgroundCheckData ? 'completed' : 'none',
   };
 
-  // Convert MOCK_TASKS to match TaskCard interface
-  const adaptedTasks: Task[] = MOCK_TASKS.map(task => ({
+  // Update theme every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTheme(getTimeBasedTheme());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Adapt MOCK_TASKS into our Task[] shape
+  const adaptedTasks: Task[] = MOCK_TASKS.map((task) => ({
     ...task,
     urgency: task.urgency as 'emergency' | 'high' | 'medium' | 'low',
-    estimatedDuration: '30-60 mins', // Add default duration
-    successRate: '96%', // Add default success rate
-    tier: 'Standard', // Add default tier
-    perks: task.perks.map(perk => ({
+    estimatedDuration: '30-60 mins',
+    successRate: '96%',
+    tier: 'Standard',
+    perks: task.perks.map((perk) => ({
       ...perk,
       description: `£${perk.value}`,
-      successRate: '96%'
-    }))
+      successRate: '96%',
+    })),
   }));
 
-  // Filtered and paginated tasks
-  const filteredTasks = adaptedTasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         task.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'all' || task.category === selectedCategory;
-    const matchesUrgency = selectedUrgency === 'all' || task.urgency === selectedUrgency;
-    
-    return matchesSearch && matchesCategory && matchesUrgency;
+  // Simple filtering by searchQuery only
+  const filteredTasks = adaptedTasks.filter((task) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      task.title.toLowerCase().includes(q) ||
+      task.description.toLowerCase().includes(q)
+    );
   });
 
   const displayedTasks = filteredTasks.slice(0, tasksDisplayed);
   const hasMoreTasks = filteredTasks.length > tasksDisplayed;
 
-  // Load more tasks
   const loadMoreTasks = useCallback(async () => {
-    await new Promise(resolve => setTimeout(resolve, 800));
-    setTasksDisplayed(prev => prev + 6);
+    // simulate network delay
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    setTasksDisplayed((prev) => prev + 6);
   }, []);
 
   const { sentinelRef } = useInfiniteScroll({
@@ -117,7 +216,6 @@ const DashboardPage = () => {
     hasMore: hasMoreTasks,
   });
 
-  // Handlers
   const toggleDarkMode = () => {
     setDarkMode(!darkMode);
     document.documentElement.classList.toggle('dark', !darkMode);
@@ -126,9 +224,18 @@ const DashboardPage = () => {
   const handleBackgroundCheckSubmit = async (data: BackgroundCheckData) => {
     setBackgroundCheckData(data);
     setShowBackgroundCheck(false);
-    
+
     if (pendingTaskClaim) {
-      alert(`🎉 Verification complete! Claiming "${pendingTaskClaim.title}"`);
+      // Enhanced success feedback
+      if (typeof window !== "undefined") {
+        const { default: confetti } = await import("canvas-confetti");
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#059669', '#047857'],
+        });
+      }
       setPendingTaskClaim(null);
     }
   };
@@ -140,18 +247,19 @@ const DashboardPage = () => {
       return;
     }
 
-    alert(`Claiming "${task.title}" for £${task.perks[0]?.value || 0}`);
-    
-    // Add confetti effect with proper positioning if event is provided
+    // Enhanced confetti effect
     if (typeof window !== "undefined") {
       const { default: confetti } = await import("canvas-confetti");
       confetti({
         particleCount: 40,
         spread: 45,
-        origin: event ? { 
-          x: event.clientX / window.innerWidth,
-          y: event.clientY / window.innerHeight
-        } : { x: 0.5, y: 0.5 }
+        origin: event
+          ? {
+              x: event.clientX / window.innerWidth,
+              y: event.clientY / window.innerHeight,
+            }
+          : { x: 0.5, y: 0.5 },
+        colors: ['#3b82f6', '#1d4ed8', '#1e40af'],
       });
     }
   };
@@ -170,300 +278,582 @@ const DashboardPage = () => {
     setTimeout(() => setLoading(false), 1000);
   }, []);
 
-  // Helper components
-  const StatCard = ({ value, label, color = "gray", icon }: { 
-    value: string; 
-    label: string; 
+  // StatCard component
+  const StatCard = ({
+    value,
+    label,
+    color = "gray",
+    icon,
+    size = "normal",
+    trend,
+  }: {
+    value: string;
+    label: string;
     color?: string;
     icon?: React.ComponentType<{ size?: number; className?: string }>;
+    size?: "normal" | "large";
+    trend?: { value: number; isPositive: boolean };
   }) => {
     const Icon = icon;
     const colorKey = color as ColorKeys;
     const colorClass = UI_CONFIG.colors[colorKey] || UI_CONFIG.colors.gray;
-    
+
     return (
-      <div className="text-center">
-        <div className="flex items-center justify-center gap-1 mb-1">
-          {Icon && <Icon size={16} className={colorClass} />}
-          <div className={`text-lg font-bold ${colorClass}`}>{value}</div>
+      <motion.div
+        className={`
+          backdrop-blur-sm bg-white/80 dark:bg-gray-800/80 border border-white/20 dark:border-gray-700/50 rounded-2xl
+          ${size === "large" ? "p-6" : "p-4"} hover:bg-white/90 dark:hover:bg-gray-800/90 transition-all
+        `}
+        {...animations.cardHover}
+        whileInView={{ opacity: 1, y: 0 }}
+        initial={{ opacity: 0, y: 20 }}
+      >
+        <div className="text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            {Icon && (
+              <motion.div whileHover={{ rotate: 360 }} transition={{ duration: 0.5 }}>
+                <Icon size={size === "large" ? 24 : 20} className={colorClass} />
+              </motion.div>
+            )}
+            <div className={`font-bold ${colorClass} ${size === "large" ? "text-3xl" : "text-xl"}`}>
+              {value}
+            </div>
+            {trend && (
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className={`text-xs px-2 py-1 rounded-full ${
+                  trend.isPositive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                }`}
+              >
+                {trend.isPositive ? '↗' : '↘'} {Math.abs(trend.value)}%
+              </motion.div>
+            )}
+          </div>
+          <div className={`text-gray-600 dark:text-gray-400 ${size === "large" ? "text-sm" : "text-xs"} font-medium`}>
+            {label}
+          </div>
         </div>
-        <div className="text-xs text-gray-600 dark:text-gray-400">{label}</div>
-      </div>
+      </motion.div>
     );
   };
 
+  // VerificationBadge component
   const VerificationBadge = ({ status }: { status: string }) => {
     const badgeKey = status as BadgeKeys;
     const config = BADGE_CONFIGS[badgeKey] || BADGE_CONFIGS.none;
     const Icon = config.icon;
+
     return (
-      <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${config.bg}`}>
-        <Icon size={12} className={config.color} />
+      <motion.div
+        className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm ${config.bg} border border-white/20`}
+        initial={{ scale: 0, rotate: -180 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={SPRING_CONFIG}
+        whileHover={{ scale: 1.05 }}
+      >
+        <motion.div
+          animate={status === 'in_progress' ? { rotate: 360 } : {}}
+          transition={status === 'in_progress' ? { duration: 2, repeat: Infinity, ease: "linear" } : {}}
+        >
+          <Icon size={14} className={config.color} />
+        </motion.div>
         <span className={config.color}>{config.text}</span>
-      </div>
+      </motion.div>
     );
   };
 
-  const ActiveTasksPreview = () => {
-    if (!MOCK_ACTIVE_TASKS || MOCK_ACTIVE_TASKS.length === 0) return null;
-    
-    return (
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-4 border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <Clock size={16} className="text-blue-600 dark:text-blue-400" />
-            Active Tasks ({MOCK_ACTIVE_TASKS.length})
-          </h3>
-          <button className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
-            View All
-          </button>
-        </div>
-        <div className="space-y-2">
-          {MOCK_ACTIVE_TASKS.slice(0, 2).map((task: ActiveTask) => (
-            <div key={task.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</p>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Due in {task.timeRemaining}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {task.status === 'in_progress' && (
-                  <AlertTriangle size={14} className="text-yellow-600" />
-                )}
-                {task.status === 'completed' && (
-                  <CheckCircle2 size={14} className="text-green-600" />
-                )}
-                <span className="text-sm font-medium text-indigo-600">{task.perk}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const VerificationPrompt = () => {
-    if (userStats.backgroundCheckStatus === 'completed') return null;
-    
-    const verifiedTasksCount = adaptedTasks.filter(task => task.requiresBackgroundCheck).length;
-    const totalValue = adaptedTasks
-      .filter(task => task.requiresBackgroundCheck)
-      .reduce((sum, task) => sum + (task.perks[0]?.value || 0), 0);
-
-    return (
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-4">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
-            <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">🔓 Unlock Premium Tasks</h3>
-            <p className="text-sm text-blue-700 dark:text-blue-200 mb-3">
-              Complete verification to access <strong>{verifiedTasksCount} premium tasks</strong> worth <strong>£{totalValue}+</strong>
-            </p>
-            <button 
-              onClick={() => setShowBackgroundCheck(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-            >
-              Start Verification (2 min)
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const Header = () => (
-    <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
-      <div className="px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-indigo-600 dark:text-indigo-400">TaskForPerks</h1>
-            <div className="px-2 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 rounded text-xs font-medium">DEMO</div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={toggleDarkMode} className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 rounded-lg">
-              {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <button onClick={() => setShowSidebar(true)} className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
-              <Menu size={20} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mt-3">
-          {[{ role: 'helper', label: 'Find Tasks' }, { role: 'requester', label: 'My Tasks' }].map(({ role, label }) => (
-            <button 
-              key={role}
-              onClick={() => setUserRole(role as 'helper' | 'requester')} 
-              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                userRole === role 
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' 
-                  : 'text-gray-600 dark:text-gray-400'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </header>
+  // ShimmerBar & SkeletonCard for loading
+  const ShimmerBar = ({
+    width = "100%", height = "h-4", className = "",
+  }: {
+    width?: string;
+    height?: string;
+    className?: string;
+  }) => (
+    <motion.div
+      className={`${height} bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 rounded-lg ${className}`}
+      style={{ width, backgroundSize: "400% 100%" }}
+      {...animations.shimmer}
+    />
   );
 
-  const Sidebar = () => showSidebar && (
-    <div className="fixed inset-0 z-50 lg:hidden">
-      <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setShowSidebar(false)} />
-      <div className="fixed right-0 top-0 h-full w-80 bg-white dark:bg-gray-800 shadow-xl overflow-y-auto">
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Profile</h2>
-            <button onClick={() => setShowSidebar(false)} className="p-2 text-gray-600 dark:text-gray-400">
-              <X size={20} />
-            </button>
+  const SkeletonCard = ({ index }: { index: number }) => (
+    <motion.div
+      className="backdrop-blur-sm bg-white/80 dark:bg-gray-800/80 rounded-2xl p-6 border border-white/20 dark:border-gray-700/50 overflow-hidden"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.1 }}
+    >
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <motion.div
+            className="w-10 h-10 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 rounded-full"
+            style={{ backgroundSize: "400% 100%" }}
+            {...animations.shimmer}
+          />
+          <div className="flex-1 space-y-2">
+            <ShimmerBar width="70%" />
+            <ShimmerBar width="45%" height="h-3" />
           </div>
-
-          <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 mb-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center">
-                <span className="text-indigo-600 dark:text-indigo-400 font-bold">JD</span>
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">John Doe</h3>
-                <VerificationBadge status={userStats.backgroundCheckStatus} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <StatCard value={userStats.tasksCompleted.toString()} label="Tasks Done" />
-              <StatCard value={userStats.rating.toString()} label="Rating" />
-            </div>
-          </div>
-
-          {userStats.backgroundCheckStatus !== 'completed' && (
-            <button 
-              onClick={() => { setShowBackgroundCheck(true); setShowSidebar(false); }}
-              className="w-full flex items-center justify-between p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20 hover:bg-orange-100 dark:hover:bg-orange-900/30 mb-3"
-            >
-              <div className="flex items-center space-x-3">
-                <Shield className="text-orange-600 dark:text-orange-400" size={20} />
-                <span className="font-medium text-orange-900 dark:text-orange-100">Complete Verification</span>
-              </div>
-              <ChevronRight className="text-orange-600 dark:text-orange-400" size={16} />
-            </button>
-          )}
         </div>
+        <ShimmerBar width="100%" height="h-3" />
+        <ShimmerBar width="60%" height="h-3" />
+        <div className="flex justify-between items-center pt-2">
+          <ShimmerBar width="80px" height="h-8" className="rounded-full" />
+          <ShimmerBar width="60px" height="h-8" className="rounded-lg" />
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  // SmartProgressBar component
+  const SmartProgressBar = ({
+    progress,
+    label,
+    color = "blue",
+  }: {
+    progress: number;
+    label: string;
+    color?: string;
+  }) => (
+    <div className="space-y-2">
+      <div className="flex justify-between text-sm">
+        <span className="text-gray-600 dark:text-gray-400">{label}</span>
+        <span className="font-medium">{progress}%</span>
+      </div>
+      <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+        <motion.div
+          className={`h-full bg-gradient-to-r from-${color}-500 to-${color}-600 rounded-full`}
+          initial={{ width: 0 }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 1, ease: "easeOut" }}
+        />
       </div>
     </div>
   );
 
-  const TaskList = () => (
-    <div className="space-y-4">
-      {loading ? (
-        Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="bg-white dark:bg-gray-800 rounded-xl p-6 border animate-pulse">
-            <div className="h-4 bg-gray-300 dark:bg-gray-600 rounded w-3/4 mb-2"></div>
-            <div className="h-3 bg-gray-300 dark:bg-gray-600 rounded w-full mb-2"></div>
-            <div className="h-3 bg-gray-300 dark:bg-gray-600 rounded w-2/3"></div>
+  // Header component
+  const Header = () => (
+    <motion.header
+      className="sticky top-0 z-40 backdrop-blur-md bg-white/80 dark:bg-gray-900/80 border-b border-white/20 dark:border-gray-700/50"
+      initial={{ y: -100 }}
+      animate={{ y: 0 }}
+      transition={SPRING_CONFIG}
+    >
+      <div className="px-4 py-3">
+        <div className="flex items-center justify-between">
+          <motion.div className="flex items-center gap-2" whileHover={{ scale: 1.02 }}>
+            <motion.h1
+              className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent"
+              whileHover={{ scale: 1.05 }}
+            >
+              TaskForPerks
+            </motion.h1>
+            <motion.div
+              className="px-2 py-1 bg-gradient-to-r from-orange-100 to-amber-100 dark:from-orange-900/30 dark:to-amber-900/30 text-orange-800 dark:text-orange-200 rounded-lg text-xs font-medium border border-orange-200/50"
+              animate={{ scale: [1, 1.05, 1] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            >
+              <Sparkles size={12} className="inline mr-1" />
+              DEMO
+            </motion.div>
+          </motion.div>
+
+          <div className="flex items-center gap-2">
+            <motion.button
+              onClick={toggleDarkMode}
+              className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/50 backdrop-blur-sm transition-all"
+              aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              {...animations.buttonPress}
+            >
+              <AnimatePresence mode="wait">
+                {darkMode ? (
+                  <motion.div
+                    key="sun"
+                    initial={{ rotate: -90, opacity: 0 }}
+                    animate={{ rotate: 0, opacity: 1 }}
+                    exit={{ rotate: 90, opacity: 0 }}
+                  >
+                    <Sun size={20} />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="moon"
+                    initial={{ rotate: 90, opacity: 0 }}
+                    animate={{ rotate: 0, opacity: 1 }}
+                    exit={{ rotate: -90, opacity: 0 }}
+                  >
+                    <Moon size={20} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.button>
+
+            <motion.button
+              onClick={() => setShowSidebar(true)}
+              className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/50 backdrop-blur-sm transition-all"
+              aria-label="Open menu"
+              {...animations.buttonPress}
+            >
+              <Menu size={20} />
+            </motion.button>
           </div>
-        ))
+        </div>
+
+        <motion.div
+          className="flex bg-gray-100/80 dark:bg-gray-700/80 backdrop-blur-sm rounded-xl p-1 mt-3 border border-white/20"
+          role="tablist"
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ delay: 0.2 }}
+        >
+          {[{ role: 'helper', label: 'Find Tasks' }, { role: 'requester', label: 'My Tasks' }].map(
+            ({ role, label }) => (
+              <motion.button
+                key={role}
+                onClick={() => setUserRole(role as 'helper' | 'requester')}
+                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  userRole === role
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-lg backdrop-blur-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-gray-600/50'
+                }`}
+                role="tab"
+                aria-selected={userRole === role}
+                aria-label={label}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {label}
+              </motion.button>
+            )
+          )}
+        </motion.div>
+      </div>
+    </motion.header>
+  );
+
+  // PerformanceStats component
+  const PerformanceStats = () => (
+    <motion.div
+      className="backdrop-blur-sm bg-white/80 dark:bg-gray-800/80 rounded-2xl p-6 mb-6 border border-white/20 dark:border-gray-700/50 relative overflow-hidden"
+      {...animations.cardHover}
+      initial={{ opacity: 0, y: 30 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.3 }}
+    >
+      {/* Animated background */}
+      <motion.div
+        className="absolute inset-0 opacity-30"
+        animate={{
+          background: [
+            "linear-gradient(45deg, rgba(59, 130, 246, 0.1) 0%, rgba(147, 51, 234, 0.1) 100%)",
+            "linear-gradient(45deg, rgba(147, 51, 234, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+          ],
+        }}
+        transition={{ duration: 4, repeat: Infinity, repeatType: "reverse" }}
+      />
+
+      <div className="relative">
+        <motion.div
+          className="flex items-center justify-between mb-6"
+          initial={{ x: -20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ delay: 0.4 }}
+        >
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <TrendingUp size={20} className="text-green-600 dark:text-green-400" />
+            Your Performance
+            <motion.div animate={{ rotate: [0, 15, -15, 0] }} transition={{ duration: 2, repeat: Infinity }}>
+              <Zap size={16} className="text-yellow-500" />
+            </motion.div>
+          </h3>
+
+          {/* Progress indicators */}
+          <div className="text-right">
+            <SmartProgressBar progress={87} label="Weekly Goal" color="green" />
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="grid grid-cols-1 sm:grid-cols-3 gap-6"
+          variants={animations.staggerChildren}
+          initial="initial"
+          animate="animate"
+        >
+          <StatCard
+            value="£35"
+            label="Today"
+            color="green"
+            icon={DollarSign}
+            size="large"
+            trend={{ value: 12, isPositive: true }}
+          />
+          <StatCard
+            value="£180"
+            label="This Week"
+            color="blue"
+            icon={TrendingUp}
+            size="large"
+            trend={{ value: 8, isPositive: true }}
+          />
+          <StatCard
+            value="4.8★"
+            label="Rating"
+            color="purple"
+            icon={Star}
+            size="large"
+            trend={{ value: 3, isPositive: true }}
+          />
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+
+  // TaskList component
+  const TaskList = () => (
+    <motion.div
+      className="space-y-4"
+      variants={animations.staggerChildren}
+      initial="initial"
+      animate="animate"
+    >
+      {loading ? (
+        Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} index={i} />)
       ) : (
         <>
-          {displayedTasks.map((task) => (
-            <TaskCard 
-              key={task.id} 
-              task={task}
-              onClick={() => handleTaskClick(task)}
-              onClaim={() => handleClaimTask(task)}
-              showClaimButton={true}
-            />
+          {displayedTasks.map((task, index) => (
+            <motion.div
+              key={task.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              whileHover={{ scale: 1.01 }}
+            >
+              <TaskCard
+                task={task}
+                onClick={() => handleTaskClick(task)}
+                onClaim={() => handleClaimTask(task)}
+                showClaimButton={true}
+              />
+            </motion.div>
           ))}
           {hasMoreTasks && <div ref={sentinelRef} className="h-4" />}
           {!hasMoreTasks && displayedTasks.length > 6 && (
-            <div className="text-center py-8">
-              <p className="text-gray-600 dark:text-gray-400 text-sm">You&apos;ve seen all available tasks</p>
-            </div>
+            <motion.div
+              className="text-center py-8"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+            >
+              <p className="text-gray-600 dark:text-gray-400 text-sm">
+                You&apos;ve seen all available tasks
+              </p>
+            </motion.div>
           )}
         </>
       )}
-    </div>
+    </motion.div>
   );
 
+  // Main render
   return (
-    <div className={`min-h-screen transition-colors ${darkMode ? 'dark bg-gray-900' : 'bg-gray-50'}`}>
+    <motion.div
+      className={`min-h-screen transition-all duration-500 ${
+        darkMode
+          ? 'dark bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900'
+          : `bg-gradient-to-br ${timeThemes[currentTheme].gradient}`
+      }`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
       <Header />
-      <Sidebar />
 
+      {/* Sidebar */}
+      <AnimatePresence>
+        {showSidebar && (
+          <motion.div className="fixed inset-0 z-50" {...animations.pageTransition}>
+            <motion.div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowSidebar(false)}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+            <motion.div
+              className="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-white/95 dark:bg-gray-800/95 backdrop-blur-md shadow-2xl overflow-y-auto border-l border-white/20"
+              initial={{ x: 320 }}
+              animate={{ x: 0 }}
+              exit={{ x: 320 }}
+              transition={SPRING_CONFIG}
+            >
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-lg font-semibold">Profile</h2>
+                  <motion.button onClick={() => setShowSidebar(false)} {...animations.buttonPress}>
+                    <X size={20} />
+                  </motion.button>
+                </div>
+
+                {/* User profile card */}
+                <motion.div
+                  className="bg-white/50 dark:bg-gray-700/50 backdrop-blur-sm rounded-2xl p-6 mb-6"
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <div className="flex items-center gap-3 mb-4">
+                    <motion.div
+                      className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold"
+                      whileHover={{ scale: 1.1, rotate: 5 }}
+                    >
+                      JD
+                    </motion.div>
+                    <div>
+                      <h3 className="font-semibold">John Doe</h3>
+                      <VerificationBadge status={userStats.backgroundCheckStatus} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <StatCard value={userStats.tasksCompleted.toString()} label="Tasks Done" />
+                    <StatCard value={userStats.rating.toString()} label="Rating" />
+                  </div>
+                </motion.div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Search Bar */}
+      {userRole === 'helper' && (
+        <motion.div
+          className="px-4 py-3 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-b border-white/20"
+          initial={{ y: -50, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                size={16}
+              />
+              <input
+                type="text"
+                placeholder="Search tasks..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-white/20 rounded-xl bg-white/50 dark:bg-gray-700/50 backdrop-blur-sm"
+              />
+            </div>
+            <motion.button
+              onClick={() => setShowFilters(!showFilters)}
+              className="px-3 py-2 rounded-xl border border-white/20 bg-white/50 dark:bg-gray-700/50 backdrop-blur-sm"
+              {...animations.buttonPress}
+            >
+              <Filter size={16} />
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Main Content */}
       <main className="px-4 py-4 pb-20 max-w-7xl mx-auto">
         {userRole === 'requester' ? (
-          <div className="bg-gradient-to-r from-indigo-600 to-blue-500 rounded-xl p-4 text-white">
-            <h2 className="text-lg font-bold mb-2">Need help with something?</h2>
-            <button onClick={navigate.createTask} className="w-full bg-white text-indigo-600 py-3 rounded-lg font-medium hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
-              <Plus size={20} />
+          <motion.div
+            className="bg-gradient-to-r from-indigo-600 to-blue-500 rounded-2xl p-6 text-white backdrop-blur-sm"
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <h2 className="text-xl font-bold mb-3">Need help with something?</h2>
+            <p className="text-indigo-100 mb-4 text-sm">
+              Post a task and get help from our community of verified helpers
+            </p>
+            <motion.button
+              onClick={navigate.createTask}
+              className="w-full bg-white text-indigo-600 py-3 px-4 rounded-xl font-medium"
+              {...animations.buttonPress}
+            >
+              <Plus size={20} className="inline mr-2" />
               Post New Task
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
         ) : (
           <div>
-            <VerificationPrompt />
-            
-            <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-gray-200 dark:border-gray-700">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                  <TrendingUp size={16} className="text-green-600 dark:text-green-400" />
-                  Your Performance
-                </h3>
-                <Star size={16} className="text-yellow-500" />
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <StatCard value="£35" label="Today" color="green" icon={DollarSign} />
-                <StatCard value="£180" label="This Week" color="blue" icon={TrendingUp} />
-                <StatCard value="4.8★" label="Rating" color="purple" icon={Star} />
-              </div>
-            </div>
-
-            <ActiveTasksPreview />
-
-            {/* Use TaskFilters component */}
-            <TaskFilters
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              selectedCategory={selectedCategory}
-              onCategoryChange={setSelectedCategory}
-              selectedUrgency={selectedUrgency}
-              onUrgencyChange={setSelectedUrgency}
-              locationFilter={locationFilter}
-              onLocationChange={setLocationFilter}
-              taskCount={filteredTasks.length}
-            />
-
+            <PerformanceStats />
             <TaskList />
           </div>
         )}
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-2 lg:hidden">
-        <div className="flex justify-around">
+      <motion.nav
+        className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md border-t border-white/20 px-4 py-2 z-30"
+        initial={{ y: 100 }}
+        animate={{ y: 0 }}
+        transition={{ delay: 0.4 }}
+      >
+        <div className="flex justify-around max-w-md mx-auto">
           {[
             { icon: Activity, label: 'Tasks', active: true },
-            { icon: Users, label: 'Messages' },
-            { icon: Plus, label: 'Post' },
-            { icon: DollarSign, label: 'Earnings' }
+            { icon: Users, label: 'Messages', active: false },
+            { icon: Plus, label: 'Post', active: false },
+            { icon: DollarSign, label: 'Earnings', active: false },
           ].map(({ icon: Icon, label, active }) => (
-            <button key={label} className={`flex flex-col items-center p-2 ${active ? 'text-indigo-600' : 'text-gray-400'}`}>
+            <motion.button
+              key={label}
+              className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
+                active ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'
+              }`}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
               <Icon size={20} />
               <span className="text-xs mt-1">{label}</span>
-            </button>
+            </motion.button>
           ))}
         </div>
-      </nav>
+      </motion.nav>
 
       {/* Background Check Modal */}
-      {showBackgroundCheck && (
-        <BackgroundCheck
-          onSubmit={handleBackgroundCheckSubmit}
-          className="fixed inset-0 z-50 overflow-y-auto bg-black bg-opacity-50 flex items-center justify-center p-4"
-        />
-      )}
-    </div>
+      <AnimatePresence>
+        {showBackgroundCheck && (
+          <motion.div
+            className="fixed inset-0 z-50 overflow-y-auto"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => setShowBackgroundCheck(false)}
+            />
+            <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+              <motion.div
+                className="relative w-full max-w-4xl bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/20"
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                transition={SPRING_CONFIG}
+              >
+                <motion.button
+                  onClick={() => setShowBackgroundCheck(false)}
+                  className="absolute right-4 top-4 z-10 p-2 rounded-xl hover:bg-white/20 transition-colors"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <X size={20} />
+                </motion.button>
+                <BackgroundCheck onSubmit={handleBackgroundCheckSubmit} className="w-full" />
+              </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 };
 

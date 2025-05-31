@@ -1,8 +1,4 @@
-// File: src/components/ui/PhotoUpload.tsx
-// Purpose: Photo picker with drag‑drop, camera capture & preview.
-// NOTE: Now supports optional/required mode and lets the user skip the step
-//       when photos are not mandatory.
-
+// components/PhotoUpload.tsx
 "use client";
 
 import React, {
@@ -33,31 +29,27 @@ export interface UploadedPhoto {
 }
 
 interface PhotoUploadProps {
-  /** Controls the modal's visibility */
+  /** Controls whether the modal is visible */
   isOpen: boolean;
-  /** Close callback */
+  /** Callback to close the modal */
   onClose: () => void;
-  /** Called when the user confirms (receives even an empty array on skip) */
+  /** Callback when user confirms; always returns array (possibly empty) */
   onPhotosSelected: (photos: UploadedPhoto[]) => void;
 
-  /* ---------------------------- Optional props --------------------------- */
-  maxPhotos?: number;          // default 5
-  maxSizePerPhoto?: number;    // MB – default 10
-  acceptedTypes?: string[];    // default jpeg|jpg|png|webp
-  title?: string;
-  description?: string;
-  className?: string;
-  /** If true at least one photo is required before continuing (default false) */
-  required?: boolean;
+  /* ------------------- Optional Props (with defaults) ------------------- */
+  maxPhotos?: number;          // Maximum number of photos user can select (default: 5)
+  maxSizePerPhoto?: number;    // Maximum size per photo in MB (default: 10)
+  acceptedTypes?: string[];    // MIME types accepted (default: ["image/jpeg","image/jpg","image/png","image/webp"])
+  title?: string;              // Modal title (default: "Upload Photos")
+  description?: string;        // Modal description (default: "Add photos...")
+  className?: string;          // Additional CSS classes for modal container
+  required?: boolean;          // If true, at least one photo is required (default: false)
 }
 
 export const PhotoUpload: React.FC<PhotoUploadProps> = ({
-  /* required props */
   isOpen,
   onClose,
   onPhotosSelected,
-
-  /* optional props with defaults */
   maxPhotos = 5,
   maxSizePerPhoto = 10,
   acceptedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"],
@@ -66,22 +58,21 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
   className = "",
   required = false,
 }) => {
-  /* -------------------------------------------------------------------- */
-  /*  State & refs                                                        */
-  /* -------------------------------------------------------------------- */
+  /* ----------------------------------------------------------------------- */
+  /*                             State & Refs                                */
+  /* ----------------------------------------------------------------------- */
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<UploadedPhoto | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [facingMode, setFacingMode] = useState<"user" | "environment">("environment");
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [isLoadingCamera, setIsLoadingCamera] = useState(false);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isLoadingCamera, setIsLoadingCamera] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);   // gallery / files
-  const cameraInputRef = useRef<HTMLInputElement>(null); // live capture
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const modalContentRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,266 +81,266 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
   const descriptionId = useId();
   const previewTitleId = useId();
 
-  /* -------------------------------------------------------------------- */
-  /*  Camera Detection & Enumeration                                      */
-  /* -------------------------------------------------------------------- */
-  useEffect(() => {
-    const detectCameras = async () => {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+  /* ----------------------------------------------------------------------- */
+  /*                        Feature Detection Helpers                        */
+  /* ----------------------------------------------------------------------- */
+  // Detect iOS (iPhone/iPad/iPod) for specialized fallback
+  const isIOS: boolean =
+  typeof window !== "undefined" &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !("MSStream" in window);
+
+  // Check for MediaDevices.getUserMedia support
+  const canUseCameraAPI =
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getUserMedia === "function";
+
+  // Check if enumerateDevices is available
+  const canEnumerateDevices =
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices &&
+    typeof navigator.mediaDevices.enumerateDevices === "function";
+
+  /* ----------------------------------------------------------------------- */
+  /*                   1️⃣ Unlock Camera & Enumerate Devices                 */
+  /*    (Essential on iOS: enumerateDevices returns empty until permission)  */
+  /* ----------------------------------------------------------------------- */
+  const unlockCameraAndEnumerate = useCallback(async () => {
+    // Step 1: Request a temporary basic stream (no constraints) to prompt permission.
+    const basicStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: false,
+    });
+    // Immediately stop all tracks to release camera for final usage.
+    basicStream.getTracks().forEach((track) => track.stop());
+
+    // Step 2: Enumerate devices now that user has granted permission.
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter((d) => d.kind === "videoinput");
+    setAvailableCameras(cams);
+
+    if (cams.length > 0) {
+      // Prefer any camera whose label contains "back" or "environment"
+      const backCamera = cams.find((c) =>
+        /back|rear|environment/i.test(c.label)
+      );
+      setSelectedCameraId(backCamera ? backCamera.deviceId : cams[0].deviceId);
+    }
+  }, []);
+
+  /* ----------------------------------------------------------------------- */
+  /*                       2️⃣ Start Camera (Primary)                        */
+  /*   - Uses two-stage approach: unlock → enumerate → final constraints     */
+  /*   - Falls back to basic getUserMedia, then to <input capture> if needed */
+  /* ----------------------------------------------------------------------- */
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    setIsLoadingCamera(true);
+
+    try {
+      // If iOS or we have not yet enumerated cameras, run the "unlock" flow.
+      if (isIOS || !canEnumerateDevices || availableCameras.length === 0) {
+        try {
+          await unlockCameraAndEnumerate();
+        } catch (unlockErr) {
+          // If unlocking or enumeration fails, fallback to file input.
+          console.warn("unlockCameraAndEnumerate failed:", unlockErr);
+          setCameraError("Cannot access camera. Falling back to file upload.");
+          setIsLoadingCamera(false);
+          // Brief delay for user to read error, then open file picker:
+          setTimeout(() => {
+            cameraInputRef.current?.click();
+          }, 1000);
           return;
         }
-
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const cameras = devices.filter(device => device.kind === 'videoinput');
-        setAvailableCameras(cameras);
-        
-        // Set default camera
-        if (cameras.length > 0 && !selectedCameraId) {
-          setSelectedCameraId(cameras[0].deviceId);
-        }
-      } catch (err) {
-        console.error("Failed to enumerate devices:", err);
-      }
-    };
-
-    detectCameras();
-  }, [selectedCameraId]);
-
-  /* -------------------------------------------------------------------- */
-  /*  Camera Functions                                                    */
-  /* -------------------------------------------------------------------- */
-  const startCamera = useCallback(async () => {
-    setIsLoadingCamera(true);
-    setCameraError(null);
-    
-    try {
-      /* -------------------------------------------------------------- */
-      /* 1️⃣  Early‑out if permission is already denied                  */
-      /* -------------------------------------------------------------- */
-      const permState: PermissionState | "prompt" = await (async () => {
-        if (!('permissions' in navigator)) return "prompt";
-        try {
-          const status = await navigator.permissions.query({ name: "camera" as PermissionName });
-          return status.state; // "granted" | "denied" | "prompt"
-        } catch {
-          return "prompt";
-        }
-      })();
-
-      if (permState === "denied") {
-        setCameraError(
-          "Your browser has blocked camera access for this site. Enable it in the site settings or choose Upload instead."
-        );
-        setIsLoadingCamera(false);
-        return;
       }
 
-      // Check if we're on a device that supports camera
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Camera API not supported");
-      }
-
-      /* -------------------------------------------------------------- */
-      /* 2️⃣  Trigger permission prompt (only when no cameras cached)    */
-      /* -------------------------------------------------------------- */
-      if (availableCameras.length === 0) {
-        try {
-          const testStream = await navigator.mediaDevices.getUserMedia({ video: true });
-          testStream.getTracks().forEach(track => track.stop());
-        } catch (permissionError) {
-          // Rethrow so we fall into the outer catch and show banner
-          throw permissionError;
-        }
-      }
-
-      let constraints: MediaStreamConstraints = {
-        audio: false,
-        video: {
-          facingMode: facingMode,
-        }
-      };
-
-      // If we have a specific camera selected, use it
-      if (selectedCameraId && selectedCameraId !== 'default') {
+      // Build final constraints based on whether we have a deviceId
+      let constraints: MediaStreamConstraints;
+      if (selectedCameraId) {
         constraints = {
+          video: { deviceId: { exact: selectedCameraId } },
           audio: false,
-          video: {
-            deviceId: { exact: selectedCameraId }
-          }
+        };
+      } else {
+        constraints = {
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
         };
       }
 
+      // Attempt to open camera with final constraints
       let mediaStream: MediaStream;
-      
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (err) {
-        // Fallback to basic video constraints
-        console.warn("Failed with specific constraints, trying basic video", err);
-        mediaStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: false, 
-          video: true 
+      } catch (constraintErr) {
+        // If constraint (facingMode/deviceId) fails, fallback to basic video
+        console.warn("getUserMedia with constraints failed:", constraintErr);
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
         });
       }
-      
+
+      // Set up <video> element source and play
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        // Ensure video plays
-        videoRef.current.play().catch(e => {
-          console.error("Video play failed:", e);
+        // On some browsers this play() may return a promise but is allowed after user click
+        await videoRef.current.play().catch((e) => {
+          console.warn("Video playback prevented:", e);
         });
       }
+
       setShowCamera(true);
       setIsLoadingCamera(false);
     } catch (err: unknown) {
-      /* -------------------------------------------------------------- */
-      /* 3️⃣  Handle any error and show friendly message                 */
-      /* -------------------------------------------------------------- */
-      const error = err as Error;
-      
-      if (process.env.NODE_ENV === "development") {
-        console.error("Camera access error:", err);
-      } else {
-        // Use debug so Next.js overlay stays hidden in production
-        console.debug("Camera access error:", err);
-      }
+      console.error("startCamera error:", err);
       setIsLoadingCamera(false);
-      
-      let errorMessage = "Unable to access camera. ";
-      
-      if (error.name === 'NotAllowedError' || error.message?.includes('permission')) {
-        errorMessage += "Please allow camera access and try again.";
-      } else if (error.name === 'NotFoundError' || error.message?.includes('not found')) {
-        errorMessage += "No camera found. Please use file upload instead.";
-      } else if (error.name === 'NotReadableError') {
-        errorMessage += "Camera is being used by another application.";
-      } else if (error.name === 'OverconstrainedError') {
-        errorMessage += "Camera settings not supported. Trying default camera...";
-        // Try once more with no constraints
-        try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
-          setStream(fallbackStream);
-          if (videoRef.current) {
-            videoRef.current.srcObject = fallbackStream;
-          }
-          setShowCamera(true);
-          setIsLoadingCamera(false);
-          return;
-        } catch {
-          errorMessage = "Unable to access any camera. Please use file upload.";
-        }
-      } else {
-        errorMessage += "Please use file upload instead.";
-      }
-      
-      setCameraError(errorMessage);
-      
-      // Automatically fallback to file input after showing error
-      setTimeout(() => {
-        setCameraError(null);
-        cameraInputRef.current?.click();
-      }, 3000);
-    }
-  }, [facingMode, selectedCameraId, availableCameras.length]);
 
+      // Determine friendly error message, narrowing `err` to Error type if possible
+      let message = "Unable to access camera. ";
+      let errorName: string | undefined;
+
+      if (err instanceof Error) {
+        errorName = err.name;
+      }
+
+      if (errorName === "NotAllowedError" || errorName === "SecurityError") {
+        message += "Please allow camera access and try again.";
+      } else if (errorName === "NotFoundError") {
+        message += "No camera found on this device.";
+      } else {
+        message += "Falling back to file upload.";
+      }
+      setCameraError(message);
+
+      // After brief delay, trigger fallback to file input
+      setTimeout(() => {
+        cameraInputRef.current?.click();
+      }, 1500);
+    }
+  }, [
+    isIOS,
+    availableCameras,
+    selectedCameraId,
+    unlockCameraAndEnumerate,
+    canEnumerateDevices,
+  ]);
+
+  /* ----------------------------------------------------------------------- */
+  /*                            3️⃣ Stop Camera                               */
+  /* ----------------------------------------------------------------------- */
   const stopCamera = useCallback(() => {
     if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((t) => t.stop());
       setStream(null);
     }
     setShowCamera(false);
     setCameraError(null);
   }, [stream]);
 
+  /* ----------------------------------------------------------------------- */
+  /*                           4️⃣ Capture Photo                              */
+  /* ----------------------------------------------------------------------- */
   const capturePhoto = useCallback(() => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext("2d");
-      
-      if (context && video.videoWidth > 0 && video.videoHeight > 0) {
-        // Set canvas dimensions to match video
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        
-        // Draw the video frame to canvas
-        context.drawImage(video, 0, 0);
-        
-        // Convert canvas to blob
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const file = new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" });
-            const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            const newPhoto: UploadedPhoto = {
-              id,
-              file,
-              url: URL.createObjectURL(file),
-              name: file.name,
-              size: file.size,
-            };
-            
-            setPhotos(prev => [...prev, newPhoto].slice(0, maxPhotos));
-            stopCamera();
-          }
-        }, "image/jpeg", 0.9);
-      }
-    }
+    if (!videoRef.current || !canvasRef.current) return;
+    const videoEl = videoRef.current;
+    const canvasEl = canvasRef.current;
+    const ctx = canvasEl.getContext("2d");
+    if (!ctx || videoEl.videoWidth === 0 || videoEl.videoHeight === 0) return;
+
+    // Draw current video frame to canvas
+    canvasEl.width = videoEl.videoWidth;
+    canvasEl.height = videoEl.videoHeight;
+    ctx.drawImage(videoEl, 0, 0);
+
+    // Convert canvas to Blob → File
+    canvasEl.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const file = new File([blob], `photo-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const newPhoto: UploadedPhoto = {
+          id,
+          file,
+          url: URL.createObjectURL(file),
+          name: file.name,
+          size: file.size,
+        };
+
+        setPhotos((prev) => {
+          // Enforce maxPhotos limit
+          const combined = [...prev, newPhoto];
+          return combined.slice(0, maxPhotos);
+        });
+
+        // Clean up and close camera once captured
+        stopCamera();
+      },
+      "image/jpeg",
+      0.9
+    );
   }, [maxPhotos, stopCamera]);
 
+  /* ----------------------------------------------------------------------- */
+  /*                       5️⃣ Switch Between Cameras                         */
+  /*       (Cycles through availableCameras; only after enumeration)         */
+  /* ----------------------------------------------------------------------- */
   const switchCamera = useCallback(() => {
-    if (availableCameras.length > 1) {
-      const currentIndex = availableCameras.findIndex(cam => cam.deviceId === selectedCameraId);
-      const nextIndex = (currentIndex + 1) % availableCameras.length;
-      setSelectedCameraId(availableCameras[nextIndex].deviceId);
-      
-      // Restart camera with new device
-      if (stream) {
-        stopCamera();
-        setTimeout(() => {
-          startCamera();
-        }, 100);
-      }
-    } else {
-      // Fallback to switching facing mode
-      setFacingMode(prev => prev === "user" ? "environment" : "user");
-      if (stream) {
-        stopCamera();
-        setTimeout(() => {
-          startCamera();
-        }, 100);
-      }
+    if (availableCameras.length < 2) {
+      // No multiple cameras detected (or older device). Do nothing or toggle facingMode logic here.
+      return;
+    }
+    const idx = availableCameras.findIndex((c) => c.deviceId === selectedCameraId);
+    const nextIdx = (idx + 1) % availableCameras.length;
+    setSelectedCameraId(availableCameras[nextIdx].deviceId);
+
+    // Restart camera with new deviceId
+    if (stream) {
+      stopCamera();
+      setTimeout(() => {
+        startCamera();
+      }, 100);
     }
   }, [availableCameras, selectedCameraId, stream, stopCamera, startCamera]);
 
-  /* -------------------------------------------------------------------- */
-  /*  File Handling Functions                                             */
-  /* -------------------------------------------------------------------- */
+  /* ----------------------------------------------------------------------- */
+  /*                        6️⃣ Handle File Uploads                           */
+  /* ----------------------------------------------------------------------- */
   const handleFiles = useCallback(
     (files: FileList) => {
       const newPhotos: UploadedPhoto[] = [];
-      const errs: string[] = [];
+      const errors: string[] = [];
 
       Array.from(files).forEach((file) => {
+        // 1. Check max count
         if (photos.length + newPhotos.length >= maxPhotos) {
-          if (!errs.includes(`Maximum ${maxPhotos} photos allowed.`))
-            errs.push(`Maximum ${maxPhotos} photos allowed.`);
+          if (!errors.includes(`Maximum ${maxPhotos} photos allowed.`)) {
+            errors.push(`Maximum ${maxPhotos} photos allowed.`);
+          }
           return;
         }
+        // 2. Check MIME type
         if (!acceptedTypes.includes(file.type)) {
-          errs.push(
+          errors.push(
             `${file.name}: Invalid type. Accept ${acceptedTypes
               .map((t) => t.split("/")[1].toUpperCase())
-              .join(", ")}`
+              .join(", ")}.`
           );
           return;
         }
+        // 3. Check file size
         if (file.size > maxSizePerPhoto * 1024 * 1024) {
-          errs.push(`${file.name}: too large (max ${maxSizePerPhoto} MB).`);
+          errors.push(`${file.name}: too large (max ${maxSizePerPhoto} MB).`);
           return;
         }
-        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        // If valid, create UploadedPhoto
+        const id = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
         newPhotos.push({
           id,
           file,
@@ -359,30 +350,45 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         });
       });
 
-      if (errs.length) alert(errs.join("\n"));
-      if (newPhotos.length)
-        setPhotos((p) => [...p, ...newPhotos].slice(0, maxPhotos));
+      // Show any errors in a single alert
+      if (errors.length) {
+        window.alert(errors.join("\n"));
+      }
+      // Append new photos (enforcing maxPhotos)
+      if (newPhotos.length) {
+        setPhotos((prev) => {
+          const combined = [...prev, ...newPhotos];
+          return combined.slice(0, maxPhotos);
+        });
+      }
     },
     [acceptedTypes, maxPhotos, maxSizePerPhoto, photos.length]
   );
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files) handleFiles(e.target.files);
+      if (e.target.files) {
+        handleFiles(e.target.files);
+      }
+      // Reset input so same file can be selected again if needed
       e.target.value = "";
     },
     [handleFiles]
   );
 
+  /* ----------------------------------------------------------------------- */
+  /*                     7️⃣ Drag & Drop Handlers                             */
+  /* ----------------------------------------------------------------------- */
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragActive(false);
-      if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files);
+      if (e.dataTransfer.files?.length) {
+        handleFiles(e.dataTransfer.files);
+      }
     },
     [handleFiles]
   );
-
   const handleDragEvent = useCallback(
     (e: React.DragEvent, active: boolean) => {
       e.preventDefault();
@@ -391,15 +397,24 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     []
   );
 
+  /* ----------------------------------------------------------------------- */
+  /*                         8️⃣ Remove a Photo                                */
+  /* ----------------------------------------------------------------------- */
   const removePhoto = useCallback((id: string) => {
-    setPhotos((p) => {
-      const doomed = p.find((ph) => ph.id === id);
-      if (doomed) URL.revokeObjectURL(doomed.url);
-      return p.filter((ph) => ph.id !== id);
+    setPhotos((prev) => {
+      const toRemove = prev.find((ph) => ph.id === id);
+      if (toRemove) {
+        URL.revokeObjectURL(toRemove.url);
+      }
+      return prev.filter((ph) => ph.id !== id);
     });
   }, []);
 
+  /* ----------------------------------------------------------------------- */
+  /*                     9️⃣ Cleanup & Close Modal                             */
+  /* ----------------------------------------------------------------------- */
   const cleanupAndClose = useCallback(() => {
+    // Revoke all object URLs to free memory
     photos.forEach((p) => URL.revokeObjectURL(p.url));
     setPhotos([]);
     setPreviewPhoto(null);
@@ -407,10 +422,12 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     onClose();
   }, [photos, onClose, stopCamera]);
 
+  /* ----------------------------------------------------------------------- */
+  /*                       🔟 Confirm Selection                                */
+  /* ----------------------------------------------------------------------- */
   const handleConfirm = useCallback(() => {
     onPhotosSelected(photos);
-    
-    // Clean up and close
+    // Cleanup after passing to parent
     photos.forEach((p) => URL.revokeObjectURL(p.url));
     setPhotos([]);
     setPreviewPhoto(null);
@@ -418,9 +435,11 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
     onClose();
   }, [onPhotosSelected, photos, onClose, stopCamera]);
 
-  /* Escape key to close */
+  /* ----------------------------------------------------------------------- */
+  /*                  ⏎ Keyboard Handling (Escape to close)                   */
+  /* ----------------------------------------------------------------------- */
   useEffect(() => {
-    const h = (ev: KeyboardEvent) => {
+    const handleKey = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") {
         if (showCamera) {
           stopCamera();
@@ -432,42 +451,50 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
       }
     };
     if (isOpen) {
-      document.addEventListener("keydown", h);
+      document.addEventListener("keydown", handleKey);
       modalContentRef.current?.focus();
     }
-    return () => document.removeEventListener("keydown", h);
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [isOpen, previewPhoto, showCamera, cleanupAndClose, stopCamera]);
 
-  // Cleanup camera on unmount
+  /* ----------------------------------------------------------------------- */
+  /*                    🛑 Cleanup on Unmount                                  */
+  /* ----------------------------------------------------------------------- */
   useEffect(() => {
     return () => {
       if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((t) => t.stop());
       }
+      photos.forEach((p) => URL.revokeObjectURL(p.url));
     };
-  }, [stream]);
+  }, [stream, photos]);
 
-  const formatSize = (b: number) => {
-    if (!b) return "0 Bytes";
-    const k = 1024,
-      i = Math.floor(Math.log(b) / Math.log(k));
-    return `${(b / Math.pow(k, i)).toFixed(2)} ${["Bytes", "KB", "MB"][i]}`;
+  /* ----------------------------------------------------------------------- */
+  /*                        Utility: Format File Size                          */
+  /* ----------------------------------------------------------------------- */
+  const formatSize = (bytes: number) => {
+    if (!bytes) return "0 Bytes";
+    const k = 1024;
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
   };
 
-  /* -------------------------------------------------------------------- */
-  /*  Early-exit when closed                                              */
-  /* -------------------------------------------------------------------- */
+  /* ----------------------------------------------------------------------- */
+  /*                         Early Exit if Closed                             */
+  /* ----------------------------------------------------------------------- */
   if (!isOpen) return null;
 
-  /* -------------------------------------------------------------------- */
-  /*  Derived values                                                      */
-  /* -------------------------------------------------------------------- */
+  /* ----------------------------------------------------------------------- */
+  /*                        Derived UI State                                   */
+  /* ----------------------------------------------------------------------- */
   const hasPhotos = photos.length > 0;
   const shouldDisableButton = required && !hasPhotos;
-  
-  let buttonText = "";
-  let buttonColor = "";
-  
+  let buttonText: string;
+  let buttonColor: string;
+
   if (!hasPhotos) {
     if (required) {
       buttonText = "Please add at least one photo";
@@ -477,23 +504,25 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
       buttonColor = "bg-indigo-600 hover:bg-indigo-700";
     }
   } else {
-    buttonText = `Continue with ${photos.length} photo${photos.length === 1 ? "" : "s"}`;
+    buttonText = `Continue with ${photos.length} photo${
+      photos.length === 1 ? "" : "s"
+    }`;
     buttonColor = "bg-indigo-600 hover:bg-indigo-700";
   }
 
-  /* -------------------------------------------------------------------- */
-  /*  UI                                                                  */
-  /* -------------------------------------------------------------------- */
+  /* ----------------------------------------------------------------------- */
+  /*                          Render: JSX                                      */
+  /* ----------------------------------------------------------------------- */
   return (
     <>
-      {/* backdrop */}
+      {/* Backdrop: closes modal on click */}
       <div
         className="fixed inset-0 bg-black/50 z-50"
         onClick={cleanupAndClose}
         aria-hidden="true"
       />
 
-      {/* modal */}
+      {/* Main Modal */}
       <div
         ref={modalContentRef}
         role="dialog"
@@ -503,7 +532,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         tabIndex={-1}
         className={`fixed inset-x-4 top-10 z-50 mx-auto max-w-2xl flex max-h-[calc(100vh-5rem)] flex-col overflow-hidden rounded-lg bg-white shadow-xl ${className}`}
       >
-        {/* header */}
+        {/* Header */}
         <header className="flex items-center justify-between border-b bg-gray-50 p-4">
           <div>
             <h3
@@ -527,7 +556,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
               {description}
               {!required && (
                 <span className="block mt-1 text-green-600 font-medium">
-                  You can skip this step if you don&apos;t have photos to add.
+                  You can skip this step if you don’t have photos to add.
                 </span>
               )}
             </p>
@@ -541,20 +570,22 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
           </button>
         </header>
 
-        {/* Camera error alert */}
+        {/* Camera Error Alert */}
         {cameraError && (
-          <div className="mx-4 mt-4 rounded-lg bg-red-50 p-4">
+          <div className="mx-4 mt-4 rounded-lg bg-red-50 p-4" role="alert">
             <div className="flex">
               <AlertCircle className="h-5 w-5 text-red-400" />
               <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">Camera Error</h3>
+                <h3 className="text-sm font-medium text-red-800">
+                  Camera Error
+                </h3>
                 <p className="mt-1 text-sm text-red-700">{cameraError}</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* drop zone */}
+        {/* Drop Zone */}
         <div className="flex-grow overflow-y-auto p-4">
           <div
             onDrop={handleDrop}
@@ -580,13 +611,13 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                 : "Upload Photos"}
             </h4>
             <p className="mb-4 text-gray-600">
-              {required 
-                ? "At least one photo is required to continue" 
-                : "Drag & drop files here or use the buttons below (completely optional)"
-              }
+              {required
+                ? "At least one photo is required to continue"
+                : "Drag & drop files here or use the buttons below (optional)"}
             </p>
 
             <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+              {/* Choose from Files Button */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -597,9 +628,17 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                 Choose Files
               </button>
 
+              {/* Take Photo Button */}
               <button
                 type="button"
-                onClick={startCamera}
+                onClick={() => {
+                  if (canUseCameraAPI) {
+                    startCamera();
+                  } else {
+                    // If camera API not available, open file input with capture
+                    cameraInputRef.current?.click();
+                  }
+                }}
                 disabled={photos.length >= maxPhotos || isLoadingCamera}
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
               >
@@ -609,14 +648,16 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
             </div>
 
             <p className="mt-3 text-xs text-gray-500">
+              Accepts{" "}
               {acceptedTypes
                 .map((t) => t.split("/")[1].toUpperCase())
-                .join(", ")} {" "}
-              up to {maxSizePerPhoto} MB. Max {maxPhotos}.
+                .join(", ")}{" "}
+              up to {maxSizePerPhoto} MB each. Max {maxPhotos} photo
+              {maxPhotos > 1 ? "s" : ""}.
             </p>
           </div>
 
-          {/* hidden inputs */}
+          {/* Hidden File Inputs */}
           <input
             ref={fileInputRef}
             type="file"
@@ -625,17 +666,32 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
             onChange={handleFileInput}
             className="hidden"
           />
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileInput}
-            className="hidden"
-          />
+
+          {/* iOS & Android-friendly Capture Fallback */}
+          {isIOS ? (
+            // iOS-specific syntax to prompt camera directly
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*;capture=camera"
+              capture
+              onChange={handleFileInput}
+              className="hidden"
+            />
+          ) : (
+            // Other mobile browsers: specify environment camera if supported
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleFileInput}
+              className="hidden"
+            />
+          )}
         </div>
 
-        {/* thumbnails */}
+        {/* Selected Photo Thumbnails */}
         {photos.length > 0 && (
           <div className="flex-shrink-0 px-4 pb-4">
             <h4 className="mb-3 font-medium text-gray-900">
@@ -653,7 +709,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                     />
                   </div>
 
-                  {/* hover mask */}
+                  {/* Hover Mask with Preview & Delete */}
                   <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/0 transition-opacity group-hover:bg-black/30">
                     <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
@@ -673,7 +729,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                     </div>
                   </div>
 
-                  {/* caption */}
+                  {/* File Name & Size Caption */}
                   <div className="absolute inset-x-0 bottom-0 rounded-b-lg bg-gradient-to-t from-black/70 to-transparent p-1.5">
                     <p className="truncate text-xs text-white" title={ph.name}>
                       {ph.name}
@@ -688,7 +744,7 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
           </div>
         )}
 
-        {/* footer */}
+        {/* Footer Buttons */}
         <footer className="flex flex-shrink-0 gap-3 border-t bg-white p-4">
           <button
             onClick={cleanupAndClose}
@@ -710,15 +766,19 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         </footer>
       </div>
 
-      {/* Camera modal */}
+      {/* Camera Overlay Modal */}
       {showCamera && (
         <>
+          {/* Semi-transparent backdrop to close camera on outside click */}
           <div
             className="fixed inset-0 z-[60] bg-black/75"
             onClick={stopCamera}
           />
+
+          {/* Camera Preview Container */}
           <div className="fixed inset-4 z-[70] flex items-center justify-center p-4">
             <div className="relative flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-black shadow-xl">
+              {/* Camera Header: Title + Switch/Close Buttons */}
               <header className="flex flex-shrink-0 items-center justify-between bg-gray-900 p-4">
                 <h4 className="font-medium text-white">Take Photo</h4>
                 <div className="flex items-center gap-2">
@@ -740,18 +800,20 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                   </button>
                 </div>
               </header>
-              
+
+              {/* Live Video Preview */}
               <div className="relative flex-grow">
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
                   muted
+                  aria-label="Live camera preview"
                   className="h-full w-full object-cover"
                 />
                 <canvas ref={canvasRef} className="hidden" />
-                
-                {/* Loading indicator */}
+
+                {/* Loading Spinner While Camera Wakes Up */}
                 {isLoadingCamera && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                     <div className="rounded-lg bg-white p-4 shadow-lg">
@@ -763,7 +825,8 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
                   </div>
                 )}
               </div>
-              
+
+              {/* Capture Button */}
               <footer className="flex-shrink-0 bg-gray-900 p-4">
                 <button
                   onClick={capturePhoto}
@@ -779,13 +842,15 @@ export const PhotoUpload: React.FC<PhotoUploadProps> = ({
         </>
       )}
 
-      {/* image preview modal */}
+      {/* Image Preview Modal */}
       {previewPhoto && (
         <>
+          {/* Backdrop */}
           <div
             className="fixed inset-0 z-[60] bg-black/75"
             onClick={() => setPreviewPhoto(null)}
           />
+          {/* Preview Container */}
           <div
             role="dialog"
             aria-modal="true"
