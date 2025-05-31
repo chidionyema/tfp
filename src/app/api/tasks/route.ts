@@ -1,4 +1,4 @@
-// app/api/tasks/route.ts
+// File: src/app/api/tasks/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { Task } from '@/lib/types';
 
@@ -6,6 +6,7 @@ import { Task } from '@/lib/types';
 export {};
 
 // Mock data for demonstration
+// We must now supply a 'dbsRequirement' field for each Task.
 const mockNewTasks: Task[] = [
   {
     id: 'new-1',
@@ -26,11 +27,12 @@ const mockNewTasks: Task[] = [
         description: '£60 cash + fuel',
         tier: 1,
         successRate: 97,
-        availability: 'instant'
-      }
+        availability: 'instant',
+      },
     ],
     tier: 1,
-    successRate: 97
+    successRate: 97,
+    dbsRequirement: 'none', // added so Task shape is satisfied
   },
   {
     id: 'new-2',
@@ -51,12 +53,13 @@ const mockNewTasks: Task[] = [
         description: '£45 PayPal',
         tier: 1,
         successRate: 99,
-        availability: 'instant'
-      }
+        availability: 'instant',
+      },
     ],
     tier: 1,
-    successRate: 99
-  }
+    successRate: 99,
+    dbsRequirement: 'none', // added so Task shape is satisfied
+  },
 ];
 
 export async function GET(request: NextRequest) {
@@ -73,29 +76,28 @@ export async function GET(request: NextRequest) {
     }
 
     const afterDate = new Date(afterParam);
-    
+
     // In a real app, this would query your database for tasks created after the given timestamp
     // For demo purposes, we'll randomly return new tasks
     const shouldReturnNewTasks = Math.random() > 0.7; // 30% chance of new tasks
-    
+
     if (shouldReturnNewTasks) {
-      const newTasks = mockNewTasks.filter(task => 
+      const newTasks = mockNewTasks.filter((task) =>
         new Date(task.createdAt) > afterDate
       );
-      
+
       return NextResponse.json({
         tasks: newTasks,
         hasMore: false,
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
       });
     }
 
     return NextResponse.json({
       tasks: [],
       hasMore: false,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
     });
-
   } catch (error) {
     console.error('Error fetching new tasks:', error);
     return NextResponse.json(

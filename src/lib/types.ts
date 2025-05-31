@@ -13,6 +13,7 @@ export interface User {
   joinDate: string;
   tasksCompleted: number;
 }
+export type DbsLevel = "none" | "basic" | "standard" | "enhanced";
 
 export interface Task {
   id: string;
@@ -31,6 +32,7 @@ export interface Task {
   perks: Perk[];
   tier: number;
   successRate: number;
+  dbsRequirement: DbsLevel;
 }
 
 export interface Perk {

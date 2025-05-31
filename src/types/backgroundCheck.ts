@@ -1,6 +1,6 @@
 // File: src/types/backgroundCheck.ts
 // Purpose: TypeScript type definitions for background check components
-
+export type DbsLevel = "none" | "basic" | "standard" | "enhanced";
 export interface UploadedPhoto {
     id: string;
     name: string;
@@ -54,6 +54,7 @@ export interface UploadedPhoto {
       nationalId: string;
       email: string;
       phone: string;
+      level: DbsLevel; 
       address: {
         street: string;
         city: string;

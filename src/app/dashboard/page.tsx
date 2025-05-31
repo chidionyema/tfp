@@ -2,8 +2,8 @@
 // Purpose: World-class dashboard with advanced animations and visual design
 
 "use client";
-import React, { useState, useEffect, useCallback, MouseEvent } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
   TrendingUp,
@@ -19,120 +19,68 @@ import {
   Filter,
   Sparkles,
   Zap,
-} from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { BackgroundCheck } from '@/components/BackgroundCheck';
-import { BackgroundCheckData } from '@/types/backgroundCheck';
-import TaskCard from '@/components/task/TaskCard';
-import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
-import { MOCK_TASKS, UI_CONFIG, BADGE_CONFIGS } from '@/constants/dashboardConstants';
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 
-// Define Theme type based on timeThemes keys
-export type Theme = 'night' | 'morning' | 'afternoon' | 'evening';
+import { BackgroundCheck } from "@/components/BackgroundCheck";
+import { BackgroundCheckData } from "@/types/backgroundCheck";
+import TaskCard from "@/components/task/TaskCard";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { MOCK_TASKS, UI_CONFIG, BADGE_CONFIGS } from "@/constants/dashboardConstants";
 
-// Time-based color schemes with explicit typing
+// --- 0. Define Theme type and time-based color schemes ---
+export type Theme = "night" | "morning" | "afternoon" | "evening";
+
 const timeThemes: Record<Theme, { gradient: string; accent: string; text: string }> = {
   night: {
-    gradient: 'from-slate-900 via-purple-900 to-slate-900',
-    accent: 'from-purple-600 to-blue-600',
-    text: 'Good evening',
+    gradient: "from-slate-900 via-purple-900 to-slate-900",
+    accent: "from-purple-600 to-blue-600",
+    text: "Good evening",
   },
   morning: {
-    gradient: 'from-blue-50 via-indigo-50 to-purple-50',
-    accent: 'from-orange-400 to-pink-400',
-    text: 'Good morning',
+    gradient: "from-blue-50 via-indigo-50 to-purple-50",
+    accent: "from-orange-400 to-pink-400",
+    text: "Good morning",
   },
   afternoon: {
-    gradient: 'from-blue-50 via-sky-50 to-cyan-50',
-    accent: 'from-blue-500 to-cyan-500',
-    text: 'Good afternoon',
+    gradient: "from-blue-50 via-sky-50 to-cyan-50",
+    accent: "from-blue-500 to-cyan-500",
+    text: "Good afternoon",
   },
   evening: {
-    gradient: 'from-orange-50 via-amber-50 to-yellow-50',
-    accent: 'from-orange-500 to-red-500',
-    text: 'Good evening',
+    gradient: "from-orange-50 via-amber-50 to-yellow-50",
+    accent: "from-orange-500 to-red-500",
+    text: "Good evening",
   },
 };
 
-// Function returns a valid Theme literal
 const getTimeBasedTheme = (): Theme => {
   const hour = new Date().getHours();
-  if (hour < 6) return 'night'; // 12 AM - 6 AM
-  if (hour < 12) return 'morning'; // 6 AM - 12 PM
-  if (hour < 18) return 'afternoon'; // 12 PM - 6 PM
-  return 'evening'; // 6 PM - 12 AM
+  if (hour < 6) return "night";       // 12 AM - 6 AM
+  if (hour < 12) return "morning";    // 6 AM - 12 PM
+  if (hour < 18) return "afternoon";  // 12 PM - 6 PM
+  return "evening";                   // 6 PM - 12 AM
 };
 
-// Animation constants
-const SPRING_CONFIG = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 30,
+// --- 1. Define the possible DBS levels (for both tasks and helpers) ---
+type DbsLevel = "none" | "basic" | "standard" | "enhanced";
+
+// We’ll assign a numeric rank to each level for easy comparison:
+const DBS_RANK: Record<DbsLevel, number> = {
+  none: 0,
+  basic: 1,
+  standard: 2,
+  enhanced: 3,
 };
 
-const EASING = [0.25, 0.1, 0.25, 1];
-
-const animations = {
-  pageTransition: {
-    initial: { opacity: 0, y: 20 },
-    animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -20 },
-    transition: SPRING_CONFIG,
-  },
-  cardHover: {
-    whileHover: {
-      scale: 1.02,
-      boxShadow:
-        "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-      transition: { duration: 0.2, ease: EASING },
-    },
-    whileTap: { scale: 0.98 },
-  },
-  buttonPress: {
-    whileHover: { scale: 1.05 },
-    whileTap: { scale: 0.95 },
-    transition: { duration: 0.1 },
-  },
-  slideIn: {
-    initial: { x: -100, opacity: 0 },
-    animate: { x: 0, opacity: 1 },
-    transition: { ...SPRING_CONFIG, delay: 0.1 },
-  },
-  staggerChildren: {
-    animate: {
-      transition: {
-        staggerChildren: 0.1,
-        delayChildren: 0.2,
-      },
-    },
-  },
-  shimmer: {
-    animate: {
-      backgroundPosition: ["200% 0", "-200% 0"],
-      transition: {
-        duration: 2,
-        ease: "linear",
-        repeat: Infinity,
-      },
-    },
-  },
-};
-
-interface UserStats {
-  tasksCompleted: number;
-  rating: number;
-  earnings: string;
-  helpedPeople: number;
-  backgroundCheckStatus: 'none' | 'pending' | 'in_progress' | 'completed' | 'failed';
-}
-
+// --- 2. Extend the Task interface to include a dbsRequirement field (local copy) ---
 interface Task {
   id: string;
   title: string;
   description: string;
   location: string;
   category: string;
-  urgency: 'emergency' | 'high' | 'medium' | 'low';
+  urgency: "emergency" | "high" | "medium" | "low";
   estimatedDuration: string;
   successRate: string | number;
   perks: Array<{
@@ -141,36 +89,227 @@ interface Task {
     successRate?: string | number;
   }>;
   tier: string | number;
-  requiresBackgroundCheck?: boolean;
+
+  // Instead of a boolean, each task now specifies exactly which DBS level it requires:
+  dbsRequirement: DbsLevel;
 }
 
-type ColorKeys = keyof typeof UI_CONFIG.colors;
-type BadgeKeys = keyof typeof BADGE_CONFIGS;
+// --- 3. Define the helper’s user stats, now including a `dbClearance` level (local copy) ---
+interface UserStats {
+  tasksCompleted: number;
+  rating: number;
+  earnings: string;
+  helpedPeople: number;
 
+  // This is the helper’s current DBS clearance level. e.g. "none", "basic", "standard", or "enhanced":
+  dbClearance: DbsLevel;
+}
+
+// --- 4. Type for negotiation-modal props ---
+interface NegotiationModalProps {
+  taskTitle: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+const SPRING_CONFIG = {
+    type: "spring" as const,
+    stiffness: 400,
+    damping: 30,
+  };
+  
+  const EASING = [0.25, 0.1, 0.25, 1];
+  
+  const animations = {
+    pageTransition: {
+      initial: { opacity: 0, y: 20 },
+      animate: { opacity: 1, y: 0 },
+      exit: { opacity: 0, y: -20 },
+      transition: SPRING_CONFIG,
+    },
+    cardHover: {
+      whileHover: {
+        scale: 1.02,
+        boxShadow:
+          "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+        transition: { duration: 0.2, ease: EASING },
+      },
+      whileTap: { scale: 0.98 },
+    },
+    buttonPress: {
+      whileHover: { scale: 1.05 },
+      whileTap: { scale: 0.95 },
+      transition: { duration: 0.1 },
+    },
+    slideIn: {
+      initial: { x: -100, opacity: 0 },
+      animate: { x: 0, opacity: 1 },
+      transition: { ...SPRING_CONFIG, delay: 0.1 },
+    },
+    staggerChildren: {
+      animate: {
+        transition: {
+          staggerChildren: 0.1,
+          delayChildren: 0.2,
+        },
+      },
+    },
+    shimmer: {
+      animate: {
+        backgroundPosition: ["200% 0", "-200% 0"],
+        transition: {
+          duration: 2,
+          ease: "linear",
+          repeat: Infinity,
+        },
+      },
+    },
+  };
+
+/**
+ * NegotiationModal
+ *
+ * When a helper already has sufficient DBS clearance (i.e. `dbClearance >= dbsRequirement`),
+ * we show this overlay so they can review any negotiation/fee details and then accept.
+ * For now, it’s a minimal “Review & Accept” screen with a confirm button.
+ */
+const NegotiationModal: React.FC<NegotiationModalProps> = ({
+  taskTitle,
+  onClose,
+  onConfirm,
+}) => {
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 overflow-y-auto"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      {/* Darkened backdrop */}
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="flex min-h-full items-center justify-center p-4 sm:items-center">
+        <motion.div
+          className="relative w-full max-w-lg bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-2xl shadow-2xl border border-white/20"
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 400, damping: 30 }}
+        >
+          {/* Close button */}
+          <motion.button
+            onClick={onClose}
+            className="absolute right-4 top-4 z-10 p-2 rounded-xl hover:bg-white/20 transition-colors"
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            aria-label="Close negotiation"
+          >
+            <X size={20} />
+          </motion.button>
+
+          {/* Content */}
+          <div className="p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              Negotiate & Accept
+            </h3>
+            <p className="text-gray-700 dark:text-gray-300 mb-6 text-sm">
+              You already have the required background clearance for{" "}
+              <span className="font-medium">{taskTitle}</span>. Review the
+              details below and click “Accept & Negotiate” to move forward.
+            </p>
+
+            {/* PLACEHOLDER: Insert any negotiation fields here (e.g. fee slider, time frames, etc.) */}
+            <div className="space-y-4 mb-6">
+              {/* Example: Show a default rate, allow the helper to propose changes */}
+              <div>
+                <label className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Proposed Fee (£):
+                </label>
+                <input
+                  type="number"
+                  defaultValue={20}
+                  min={0}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Notes / Comments (Optional):
+                </label>
+                <textarea
+                  rows={3}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm text-gray-900 dark:text-gray-100"
+                  placeholder="Any clarifications, timing constraints, etc."
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 transition-colors text-gray-800 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 transition-colors text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+              >
+                Accept &amp; Negotiate
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+};
+
+// --- 5. Main DashboardPage component ---
 const DashboardPage: React.FC = () => {
-  const [userRole, setUserRole] = useState<'requester' | 'helper'>('helper');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [userRole, setUserRole] = useState<"requester" | "helper">("helper");
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [showSidebar, setShowSidebar] = useState<boolean>(false);
   const [showFilters, setShowFilters] = useState<boolean>(false);
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [tasksDisplayed, setTasksDisplayed] = useState<number>(6);
-  const [showBackgroundCheck, setShowBackgroundCheck] = useState<boolean>(false);
-  const [backgroundCheckData, setBackgroundCheckData] = useState<BackgroundCheckData | null>(null);
-  const [pendingTaskClaim, setPendingTaskClaim] = useState<Task | null>(null);
+
+  // 5a) Track which theme (morning/evening/etc.) we’re on, so we can re-render every minute.
   const [currentTheme, setCurrentTheme] = useState<Theme>(getTimeBasedTheme());
+
+  // Instead of a single boolean, we track exactly which DBS clearance this helper has:
+  const [helperDbsClearance, setHelperDbsClearance] = useState<DbsLevel>("none");
+
+  // “BackgroundCheckData” is whatever the BackgroundCheck component returns
+  const [backgroundCheckData, setBackgroundCheckData] =
+    useState<BackgroundCheckData | null>(null);
+
+  // When we click “Claim Task” but the helper lacks required clearance, we store that task here to open BackgroundCheck modal:
+  const [pendingTaskClaim, setPendingTaskClaim] = useState<Task | null>(null);
+
+  // Controls whether the BackgroundCheck modal is visible:
+  const [showBackgroundCheck, setShowBackgroundCheck] = useState<boolean>(false);
+
+  // New: tracks whether the Negotiation modal is open, and which task is being negotiated:
+  const [showNegotiationModal, setShowNegotiationModal] =
+    useState<boolean>(false);
+  const [negotiationTask, setNegotiationTask] = useState<Task | null>(null);
 
   const router = useRouter();
 
+  // Build userStats from helperDbsClearance
   const userStats: UserStats = {
     tasksCompleted: 47,
     rating: 4.8,
-    earnings: '£340',
+    earnings: "£340",
     helpedPeople: 32,
-    backgroundCheckStatus: backgroundCheckData ? 'completed' : 'none',
+    dbClearance: helperDbsClearance,
   };
 
-  // Update theme every minute
+  // 5b) Update currentTheme every minute
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTheme(getTimeBasedTheme());
@@ -178,18 +317,29 @@ const DashboardPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Adapt MOCK_TASKS into our Task[] shape
-  const adaptedTasks: Task[] = MOCK_TASKS.map((task) => ({
+  // Adapt MOCK_TASKS into our Task[] shape, including a dbsRequirement field:
+  // (Here, for illustration, we randomly assign a requirement. In a real app, your
+  // database or API would supply the correct `dbsRequirement` per task.)
+  const adaptedTasks: Task[] = MOCK_TASKS.map((task, idx) => ({
     ...task,
-    urgency: task.urgency as 'emergency' | 'high' | 'medium' | 'low',
-    estimatedDuration: '30-60 mins',
-    successRate: '96%',
-    tier: 'Standard',
+    // For demonstration, alternate requirements in a pattern
+    dbsRequirement:
+      idx % 4 === 0
+        ? "enhanced"
+        : idx % 4 === 1
+        ? "standard"
+        : idx % 4 === 2
+        ? "basic"
+        : "none",
+    urgency: task.urgency as "emergency" | "high" | "medium" | "low",
+    estimatedDuration: "30-60 mins",
+    successRate: "96%",
     perks: task.perks.map((perk) => ({
       ...perk,
       description: `£${perk.value}`,
-      successRate: '96%',
+      successRate: "96%",
     })),
+    tier: "Standard",
   }));
 
   // Simple filtering by searchQuery only
@@ -205,7 +355,7 @@ const DashboardPage: React.FC = () => {
   const hasMoreTasks = filteredTasks.length > tasksDisplayed;
 
   const loadMoreTasks = useCallback(async () => {
-    // simulate network delay
+    // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 800));
     setTasksDisplayed((prev) => prev + 6);
   }, []);
@@ -218,49 +368,80 @@ const DashboardPage: React.FC = () => {
 
   const toggleDarkMode = () => {
     setDarkMode(!darkMode);
-    document.documentElement.classList.toggle('dark', !darkMode);
+    document.documentElement.classList.toggle("dark", !darkMode);
   };
 
+  // --- 6. handleBackgroundCheckSubmit: when the helper completes a new background check ---
   const handleBackgroundCheckSubmit = async (data: BackgroundCheckData) => {
+    // Suppose BackgroundCheckData includes a field `level: DbsLevel` to indicate which clearance they now have.
     setBackgroundCheckData(data);
+
+    // Update the helper’s clearance based on what they just completed:
+    // (You may have your own logic in BackgroundCheck to know “basic” vs “standard” vs “enhanced”.)
+    if (data.personalInfo.level
+        && DBS_RANK[data.personalInfo.level
+        ] > DBS_RANK[helperDbsClearance]) {
+      setHelperDbsClearance(data.personalInfo.level
+      );
+    }
+
     setShowBackgroundCheck(false);
 
+    // After obtaining the new clearance, if there was a pending task that triggered this modal:
     if (pendingTaskClaim) {
-      // Enhanced success feedback
-      if (typeof window !== "undefined") {
-        const { default: confetti } = await import("canvas-confetti");
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#10b981', '#059669', '#047857'],
-        });
+      // Check again: does this new clearance satisfy the task?
+      const required = pendingTaskClaim.dbsRequirement;
+      if (DBS_RANK[data.personalInfo.level
+      ] >= DBS_RANK[required]) {
+        // Now we can move into negotiation/accept flow:
+        setNegotiationTask(pendingTaskClaim);
+        setShowNegotiationModal(true);
       }
+      // Clear the “pendingTaskClaim” either way:
       setPendingTaskClaim(null);
     }
   };
 
-  const handleClaimTask = async (task: Task, event?: MouseEvent<HTMLButtonElement>) => {
-    if (task.requiresBackgroundCheck && userStats.backgroundCheckStatus !== 'completed') {
+  // --- 7. handleClaimTask: when the user clicks the “Claim Task” button on a TaskCard ---
+  const handleClaimTask = async (
+    task: Task
+  ) => {
+    const helperRank = DBS_RANK[userStats.dbClearance];
+    const requiredRank = DBS_RANK[task.dbsRequirement];
+
+    // 1) If helper’s clearance < task’s requirement, open BackgroundCheck modal:
+    if (helperRank < requiredRank) {
       setPendingTaskClaim(task);
       setShowBackgroundCheck(true);
       return;
     }
 
-    // Enhanced confetti effect
-    if (typeof window !== "undefined") {
-      const { default: confetti } = await import("canvas-confetti");
-      confetti({
-        particleCount: 40,
-        spread: 45,
-        origin: event
-          ? {
-              x: event.clientX / window.innerWidth,
-              y: event.clientY / window.innerHeight,
-            }
-          : { x: 0.5, y: 0.5 },
-        colors: ['#3b82f6', '#1d4ed8', '#1e40af'],
-      });
+    // 2) If helper’s clearance >= task’s requirement, open Negotiation modal:
+    // (We store the task in state so the NegotiationModal knows which title to show.)
+    setNegotiationTask(task);
+    setShowNegotiationModal(true);
+  };
+
+  // --- 8. When helper CONFIRMS negotiation, here is where you’d call your API / finalize the claim ---
+  const handleConfirmNegotiation = () => {
+    if (negotiationTask) {
+      // Example: call an API to finalize the claim, passing negotiation details.
+      // For now, we’ll just show confetti as confirmation.
+
+      if (typeof window !== "undefined") {
+        import("canvas-confetti").then((mod) => {
+          const confetti = mod.default;
+          confetti({
+            particleCount: 50,
+            spread: 60,
+            origin: { x: 0.5, y: 0.5 },
+            colors: ["#3b82f6", "#1d4ed8", "#1e40af"],
+          });
+        });
+      }
+
+      setShowNegotiationModal(false);
+      setNegotiationTask(null);
     }
   };
 
@@ -269,16 +450,17 @@ const DashboardPage: React.FC = () => {
   };
 
   const navigate = {
-    createTask: () => router.push('/tasks/create'),
-    messages: () => alert('Navigate to messages'),
-    earnings: () => alert('Navigate to earnings'),
+    createTask: () => router.push("/tasks/create"),
+    messages: () => alert("Navigate to messages"),
+    earnings: () => alert("Navigate to earnings"),
   };
 
+  // Simulate loading initial content
   useEffect(() => {
     setTimeout(() => setLoading(false), 1000);
   }, []);
 
-  // StatCard component
+  // --- 9. Remaining UI components (StatCard, VerificationBadge, Shimmer, etc.) ---
   const StatCard = ({
     value,
     label,
@@ -295,7 +477,7 @@ const DashboardPage: React.FC = () => {
     trend?: { value: number; isPositive: boolean };
   }) => {
     const Icon = icon;
-    const colorKey = color as ColorKeys;
+    const colorKey = color as keyof typeof UI_CONFIG.colors;
     const colorClass = UI_CONFIG.colors[colorKey] || UI_CONFIG.colors.gray;
 
     return (
@@ -323,10 +505,10 @@ const DashboardPage: React.FC = () => {
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 className={`text-xs px-2 py-1 rounded-full ${
-                  trend.isPositive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  trend.isPositive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
                 }`}
               >
-                {trend.isPositive ? '↗' : '↘'} {Math.abs(trend.value)}%
+                {trend.isPositive ? "↗" : "↘"} {Math.abs(trend.value)}%
               </motion.div>
             )}
           </div>
@@ -338,9 +520,8 @@ const DashboardPage: React.FC = () => {
     );
   };
 
-  // VerificationBadge component
   const VerificationBadge = ({ status }: { status: string }) => {
-    const badgeKey = status as BadgeKeys;
+    const badgeKey = status as keyof typeof BADGE_CONFIGS;
     const config = BADGE_CONFIGS[badgeKey] || BADGE_CONFIGS.none;
     const Icon = config.icon;
 
@@ -353,8 +534,8 @@ const DashboardPage: React.FC = () => {
         whileHover={{ scale: 1.05 }}
       >
         <motion.div
-          animate={status === 'in_progress' ? { rotate: 360 } : {}}
-          transition={status === 'in_progress' ? { duration: 2, repeat: Infinity, ease: "linear" } : {}}
+          animate={status === "in_progress" ? { rotate: 360 } : {}}
+          transition={status === "in_progress" ? { duration: 2, repeat: Infinity, ease: "linear" } : {}}
         >
           <Icon size={14} className={config.color} />
         </motion.div>
@@ -363,9 +544,10 @@ const DashboardPage: React.FC = () => {
     );
   };
 
-  // ShimmerBar & SkeletonCard for loading
   const ShimmerBar = ({
-    width = "100%", height = "h-4", className = "",
+    width = "100%",
+    height = "h-4",
+    className = "",
   }: {
     width?: string;
     height?: string;
@@ -407,7 +589,6 @@ const DashboardPage: React.FC = () => {
     </motion.div>
   );
 
-  // SmartProgressBar component
   const SmartProgressBar = ({
     progress,
     label,
@@ -464,7 +645,7 @@ const DashboardPage: React.FC = () => {
             <motion.button
               onClick={toggleDarkMode}
               className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/50 backdrop-blur-sm transition-all"
-              aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
               {...animations.buttonPress}
             >
               <AnimatePresence mode="wait">
@@ -508,26 +689,27 @@ const DashboardPage: React.FC = () => {
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
-          {[{ role: 'helper', label: 'Find Tasks' }, { role: 'requester', label: 'My Tasks' }].map(
-            ({ role, label }) => (
-              <motion.button
-                key={role}
-                onClick={() => setUserRole(role as 'helper' | 'requester')}
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  userRole === role
-                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-lg backdrop-blur-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-gray-600/50'
-                }`}
-                role="tab"
-                aria-selected={userRole === role}
-                aria-label={label}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                {label}
-              </motion.button>
-            )
-          )}
+          {[
+            { role: "helper", label: "Find Tasks" },
+            { role: "requester", label: "My Tasks" },
+          ].map(({ role, label }) => (
+            <motion.button
+              key={role}
+              onClick={() => setUserRole(role as "helper" | "requester")}
+              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                userRole === role
+                  ? "bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-lg backdrop-blur-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-white/50 dark:hover:bg-gray-600/50"
+              }`}
+              role="tab"
+              aria-selected={userRole === role}
+              aria-label={label}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              {label}
+            </motion.button>
+          ))}
         </motion.div>
       </div>
     </motion.header>
@@ -661,7 +843,7 @@ const DashboardPage: React.FC = () => {
     <motion.div
       className={`min-h-screen transition-all duration-500 ${
         darkMode
-          ? 'dark bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900'
+          ? "dark bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
           : `bg-gradient-to-br ${timeThemes[currentTheme].gradient}`
       }`}
       initial={{ opacity: 0 }}
@@ -712,7 +894,7 @@ const DashboardPage: React.FC = () => {
                     </motion.div>
                     <div>
                       <h3 className="font-semibold">John Doe</h3>
-                      <VerificationBadge status={userStats.backgroundCheckStatus} />
+                      <VerificationBadge status={backgroundCheckData ? "completed" : "none"} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -727,7 +909,7 @@ const DashboardPage: React.FC = () => {
       </AnimatePresence>
 
       {/* Mobile Search Bar */}
-      {userRole === 'helper' && (
+      {userRole === "helper" && (
         <motion.div
           className="px-4 py-3 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-b border-white/20"
           initial={{ y: -50, opacity: 0 }}
@@ -761,7 +943,7 @@ const DashboardPage: React.FC = () => {
 
       {/* Main Content */}
       <main className="px-4 py-4 pb-20 max-w-7xl mx-auto">
-        {userRole === 'requester' ? (
+        {userRole === "requester" ? (
           <motion.div
             className="bg-gradient-to-r from-indigo-600 to-blue-500 rounded-2xl p-6 text-white backdrop-blur-sm"
             initial={{ scale: 0.95, opacity: 0 }}
@@ -798,15 +980,15 @@ const DashboardPage: React.FC = () => {
       >
         <div className="flex justify-around max-w-md mx-auto">
           {[
-            { icon: Activity, label: 'Tasks', active: true },
-            { icon: Users, label: 'Messages', active: false },
-            { icon: Plus, label: 'Post', active: false },
-            { icon: DollarSign, label: 'Earnings', active: false },
+            { icon: Activity, label: "Tasks", active: true },
+            { icon: Users, label: "Messages", active: false },
+            { icon: Plus, label: "Post", active: false },
+            { icon: DollarSign, label: "Earnings", active: false },
           ].map(({ icon: Icon, label, active }) => (
             <motion.button
               key={label}
               className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
-                active ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'
+                active ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400"
               }`}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -827,6 +1009,7 @@ const DashboardPage: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
+            {/* Backdrop */}
             <div
               className="fixed inset-0 bg-black/50 backdrop-blur-sm"
               onClick={() => setShowBackgroundCheck(false)}
@@ -839,6 +1022,7 @@ const DashboardPage: React.FC = () => {
                 exit={{ scale: 0.9, opacity: 0 }}
                 transition={SPRING_CONFIG}
               >
+                {/* Close button */}
                 <motion.button
                   onClick={() => setShowBackgroundCheck(false)}
                   className="absolute right-4 top-4 z-10 p-2 rounded-xl hover:bg-white/20 transition-colors"
@@ -847,10 +1031,25 @@ const DashboardPage: React.FC = () => {
                 >
                   <X size={20} />
                 </motion.button>
+                {/* BackgroundCheck component: passes onSubmit back to handleBackgroundCheckSubmit */}
                 <BackgroundCheck onSubmit={handleBackgroundCheckSubmit} className="w-full" />
               </motion.div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Negotiation & Accept Modal */}
+      <AnimatePresence>
+        {showNegotiationModal && negotiationTask && (
+          <NegotiationModal
+            taskTitle={negotiationTask.title}
+            onClose={() => {
+              setShowNegotiationModal(false);
+              setNegotiationTask(null);
+            }}
+            onConfirm={handleConfirmNegotiation}
+          />
         )}
       </AnimatePresence>
     </motion.div>

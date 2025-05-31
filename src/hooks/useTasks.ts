@@ -9,7 +9,7 @@ export const useTasks = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate API call - in real app, this would fetch from your API
+    // Simulate API call - in a real app, this would fetch from your backend/API
     setTimeout(() => {
       const mockTasks: Task[] = [
         {
@@ -23,19 +23,24 @@ export const useTasks = () => {
           createdAt: '2024-01-15T10:30:00Z',
           estimatedDuration: '90 minutes',
           requesterId: 'user1',
-          perks: [{
-            id: 'p1',
-            type: 'cash',
-            value: 35,
-            description: '£35 PayPal',
-            tier: 1,
-            successRate: 98,
-            availability: 'instant'
-          }],
+          // Add the required `dbsRequirement` field:
+          dbsRequirement: 'none',
+          perks: [
+            {
+              id: 'p1',
+              type: 'cash',
+              value: 35,
+              description: '£35 PayPal',
+              tier: 1,
+              successRate: 98,
+              availability: 'instant'
+            }
+          ],
           tier: 1,
           successRate: 96
         }
       ];
+
       setTasks(mockTasks);
       setLoading(false);
     }, 1000);
