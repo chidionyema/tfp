@@ -58,3 +58,64 @@ model VerificationToken {
 
   @@unique([identifier, token])
 }
+
+model Task {
+  id           String   @id @default(uuid())
+  title        String
+  description  String
+  category     String
+  location     String
+  urgency      TaskUrgency
+  dbsRequired  DbsLevel
+  maxClaims    Int       @default(5)
+  version      Int       @default(0) // ★ optimistic-locking token
+  status       TaskStatus @default(OPEN)
+  claims       Claim[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Claim {
+  id          String      @id @default(uuid())
+  taskId      String
+  helperId    String
+  fee         Int
+  notes       String?
+  status      ClaimStatus @default(PENDING)
+  expiresAt   DateTime
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@index([taskId, status])
+}
+
+enum TaskUrgency {
+  EMERGENCY
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum DbsLevel {
+  NONE
+  BASIC
+  STANDARD
+  ENHANCED
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  CANCELLED
+  COMPLETE
+}
+
+enum ClaimStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+

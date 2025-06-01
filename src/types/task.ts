@@ -25,7 +25,7 @@ export interface Task {
   createdAt: string;
   estimatedDuration: string;
   requesterId: string;
-
+  updatedAt?:  string;
   /* Locations (only relevant when mode includes physical) */
   location?: GeoPoint | null;
   dropoffLocation?: GeoPoint | null;
